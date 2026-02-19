@@ -12,6 +12,17 @@ const ALLOWED_HOSTS = new Set([
 
 export async function onRequest(context) {
   const req = context.request;
+  if (req.method === "OPTIONS") {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        "access-control-allow-origin": "*",
+        "access-control-allow-methods": "GET, OPTIONS",
+        "access-control-allow-headers": "Content-Type",
+        "cache-control": "public, max-age=300"
+      }
+    });
+  }
   const reqUrl = new URL(req.url);
   const target = reqUrl.searchParams.get("url");
 
@@ -35,12 +46,7 @@ export async function onRequest(context) {
   }
 
   try {
-    const upstream = await fetch(parsed.toString(), {
-      method: "GET",
-      headers: {
-        "User-Agent": "IFR-Training-Route-Planner/1.0"
-      }
-    });
+    const upstream = await fetch(parsed.toString(), { method: "GET" });
 
     const headers = new Headers();
     const contentType = upstream.headers.get("content-type") || "text/plain; charset=utf-8";
@@ -48,8 +54,13 @@ export async function onRequest(context) {
 
     headers.set("content-type", contentType);
     headers.set("cache-control", cacheControl);
+    headers.set("access-control-allow-origin", "*");
+    headers.set("access-control-allow-methods", "GET, OPTIONS");
+    headers.set("access-control-allow-headers", "Content-Type");
 
-    return new Response(upstream.body, {
+    const body = await upstream.arrayBuffer();
+
+    return new Response(body, {
       status: upstream.status,
       headers
     });

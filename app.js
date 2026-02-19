@@ -12,8 +12,10 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.3";
+const APP_VERSION = "0.0.6";
 const VERSION_FILE_PATH = "version.json";
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
+const PROFILE_BUILD_CONCURRENCY = 6;
 
 const FLIGHT_RULES = {
   single: {
@@ -420,13 +422,13 @@ async function buildAirportProfiles({
     .sort((a, b) => a.distanceFromOriginNm - b.distanceFromOriginNm)
     .slice(0, flightType === "triple" ? 35 : 45);
 
-  return Promise.all(trimmed.map((airport) => buildAirportProfile({
+  return mapWithConcurrency(trimmed, PROFILE_BUILD_CONCURRENCY, (airport) => buildAirportProfile({
     airport,
     origin,
     runwaysByAirport,
     flightDate,
     timeLocal
-  })));
+  }));
 }
 
 async function buildAirportProfile({ airport, origin, runwaysByAirport, flightDate, timeLocal }) {
@@ -765,10 +767,7 @@ async function getSurfaceWindKnots(airport, flightDate, timeLocal) {
   }
 
   try {
-    const response = await fetch(`${endpoint}?${params.toString()}`);
-    if (!response.ok) throw new Error("wind fetch failed");
-
-    const json = await response.json();
+    const json = await fetchJsonFromAny([`${endpoint}?${params.toString()}`]);
     const hourly = json.hourly;
     if (!hourly?.time?.length) throw new Error("no hourly wind returned");
 
@@ -842,10 +841,7 @@ async function fetchApproaches(ident, supplementalCharts = null) {
 
   try {
     const params = new URLSearchParams({ apt: ident, group: "6" });
-    const response = await fetch(`${AVIATION_API_CHARTS}?${params.toString()}`);
-    if (!response.ok) throw new Error("approach request failed");
-
-    const json = await response.json();
+    const json = await fetchJsonFromAny([`${AVIATION_API_CHARTS}?${params.toString()}`]);
     const rows = json[ident];
     if (!Array.isArray(rows)) {
       cache.approachesByAirport.set(ident, []);
@@ -1503,6 +1499,26 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+async function mapWithConcurrency(items, limit, mapper) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (true) {
+      const i = nextIndex;
+      nextIndex += 1;
+      if (i >= items.length) return;
+      results[i] = await mapper(items[i], i);
+    }
+  }
+
+  const workers = [];
+  const count = Math.max(1, Math.min(limit, items.length));
+  for (let i = 0; i < count; i += 1) workers.push(worker());
+  await Promise.all(workers);
+  return results;
+}
+
 function shuffleCopy(list) {
   const arr = [...list];
   for (let i = arr.length - 1; i > 0; i -= 1) {
@@ -1529,12 +1545,43 @@ async function fetchTextFromAny(urls) {
   throw lastError || new Error("All fetches failed");
 }
 
-function buildFetchCandidates(url) {
-  const out = [url];
-  if (!String(url).startsWith("http")) return out;
+async function fetchJsonFromAny(urls) {
+  const text = await fetchTextFromAny(urls);
+  try {
+    return JSON.parse(text);
+  } catch (_error) {
+    throw new Error("Invalid JSON response");
+  }
+}
 
-  // Cloudflare Pages Function proxy (same-origin in deployed site).
-  out.push(`/api/proxy?url=${encodeURIComponent(url)}`);
+function buildFetchCandidates(url) {
+  const out = [];
+  if (!String(url).startsWith("http")) return [url];
+
+  const isLocal = LOCAL_HOSTS.has(window.location.hostname);
+  try {
+    new URL(url);
+  } catch (_error) {
+    return [url];
+  }
+
+  // Local static hosting (python http.server) has no /api/proxy route.
+  // Use public proxy candidates for external hosts while developing locally.
+  if (isLocal) {
+    out.push(`https://corsproxy.io/?${encodeURIComponent(url)}`);
+    out.push(`https://corsproxy.io/?${url}`);
+    out.push(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
+    const forJina = url.replace(/^https?:\/\//i, "");
+    out.push(`https://r.jina.ai/http://${forJina}`);
+    out.push(url);
+    return out;
+  }
+
+  out.push(url);
+  if (!isLocal) {
+    // Cloudflare Pages Function proxy (same-origin in deployed site).
+    out.push(`/api/proxy?url=${encodeURIComponent(url)}`);
+  }
   return out;
 }
 

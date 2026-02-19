@@ -51,6 +51,12 @@ TACAN procedures remain in backend parsing but are excluded from T-6 scoring/out
 This app uses a same-origin proxy at `/api/proxy` (implemented in `functions/proxy.js`) to fetch FAA/Aviation data without browser CORS proxy services.  
 If deployed on Cloudflare Pages, ensure `functions/proxy.js` is included in your project.
 
+## Local Dev Notes
+
+- `python3 -m http.server 8080` serves static files only (no `/api/proxy` route).
+- On localhost, the app now avoids `/api/proxy` for AviationAPI chart HTML and uses localhost-safe fallback fetch candidates.
+- For full parity with Cloudflare Functions locally, run Pages dev (`wrangler pages dev .`) instead of static-only hosting.
+
 ## Versioning
 
 The app uses semantic versioning with patch bumps for small bug fixes: `v0.0.x`.
