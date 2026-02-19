@@ -288,6 +288,19 @@ button.secondary {
   align-items: center;
 }
 
+.overview-approaches {
+  margin-top: 0.45rem;
+}
+
+.overview-approaches ul {
+  margin: 0.25rem 0 0.45rem;
+  padding-left: 1.05rem;
+}
+
+.overview-approaches a {
+  color: #0a6f59;
+}
+
 .warning {
   color: #8b4a00;
 }

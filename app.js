@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.14";
+const APP_VERSION = "0.0.15";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
@@ -1049,6 +1049,7 @@ function renderAll(model) {
       const expandedHtml = index === selectedRouteIndex
         ? routeDetailInlineHtml(route, model.origin, model.originProfile, mapContainerId(route))
         : "";
+      const overviewAirports = [model.originProfile, ...route.stops];
       return `
         <article class="route-card${selectedClass}">
           <div class="route-head">
@@ -1060,7 +1061,10 @@ function renderAll(model) {
           </div>
 
           <div class="route-overview">
-            ${route.stops.map((stop) => stopOverviewHtml(stop)).join("")}
+            ${overviewAirports.map((airport, airportIndex) => routeOptionAirportCardHtml(
+              airport,
+              airportIndex === 0 ? "Origin / Home Field" : `Destination ${airportIndex}`
+            )).join("")}
           </div>
 
           <div>
@@ -1077,22 +1081,37 @@ function renderAll(model) {
   if (selected) renderRouteMap(selected, model.origin, mapContainerId(selected));
 }
 
-function stopOverviewHtml(stop) {
-  const runway = stop.likelyRunway;
-  const displayTypes = stop.approachStats.typesLikely.filter((t) => INCLUDE_TACAN_FOR_T6_SCORING || t !== "TACAN");
+function routeOptionAirportCardHtml(airport, label) {
+  const runway = airport.likelyRunway;
+  const displayTypes = airport.approachStats.typesLikely.filter((t) => INCLUDE_TACAN_FOR_T6_SCORING || t !== "TACAN");
   const types = displayTypes.length ? displayTypes.slice(0, 4).join(", ") : "None";
   const runwayBand = runway ? runway.highlightBand : "red";
-  const hasWarnings = stop.suitability.flags.length > 0;
+  const hasWarnings = airport.suitability.flags.length > 0;
+  const likelyApproaches = (airport.approachStats.selectedApproaches || [])
+    .filter((a) => INCLUDE_TACAN_FOR_T6_SCORING || !classifyApproachTypes(a.name).includes("TACAN"));
+  const alternateApproaches = (airport.approachStats.alternateApproaches || [])
+    .filter((a) => INCLUDE_TACAN_FOR_T6_SCORING || !classifyApproachTypes(a.name).includes("TACAN"));
 
   return `
     <div class="overview-row">
+      <div class="small text-uppercase">${label}</div>
       <div class="overview-line">
-        <strong>${stop.ident}</strong>
-        <span class="subtle">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
+        <strong>${airport.ident}</strong>
+        <span class="subtle">Wind ${airport.wind.directionDeg.toFixed(0)}° @ ${airport.wind.speedKt.toFixed(0)} kt</span>
         <span class="subtle"><span class="dot dot-${runwayBand}"></span> RWY ${runway ? runway.runwayIdent : "N/A"}</span>
         <span class="subtle">Types: ${types}</span>
       </div>
-      ${hasWarnings ? `<div class="small warning">Caution: ${escapeHtml(stop.suitability.flags[0])}. Check IFR supplement for PPR/remarks.</div>` : ""}
+      <div class="overview-approaches">
+        <div class="small"><strong>Primary:</strong></div>
+        ${likelyApproaches.length
+          ? `<ul>${likelyApproaches.map((a) => `<li>${approachLinkHtml(a)}</li>`).join("")}</ul>`
+          : "<div class=\"small\">No primary approaches detected.</div>"}
+        <div class="small"><strong>Other:</strong></div>
+        ${alternateApproaches.length
+          ? `<ul>${alternateApproaches.map((a) => `<li>${approachLinkHtml(a)}</li>`).join("")}</ul>`
+          : "<div class=\"small\">No other approaches detected.</div>"}
+      </div>
+      ${hasWarnings ? `<div class="small warning">Caution: ${escapeHtml(airport.suitability.flags[0])}. Check IFR supplement for PPR/remarks.</div>` : ""}
     </div>
   `;
 }
