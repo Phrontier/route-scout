@@ -14,11 +14,15 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.14";
+const APP_VERSION = "0.0.16";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
 const PROXY_PATH = "/proxy";
+const SINGLE_PROFILE_POOL_SIZE = 45;
+const DOUBLE_PROFILE_POOL_SIZE = 80;
+const TRIPLE_PROFILE_POOL_SIZE = 70;
+const TRIPLE_COMBINATOR_POOL_SIZE = 40;
 
 const FLIGHT_RULES = {
   single: {
@@ -196,7 +200,7 @@ formEl.addEventListener("submit", async (event) => {
       flightDate,
       timeLocal
     });
-    const profiles = await buildAirportProfiles({
+    const { profiles, candidateStats } = await buildAirportProfiles({
       origin,
       airports,
       runwaysByAirport,
@@ -207,7 +211,7 @@ formEl.addEventListener("submit", async (event) => {
     });
 
     setStatus("Generating and scoring multiple route options...", false, true);
-    const routes = generateRoutes({ origin, profiles, flightType, maxLegNm, requiredApproachTypes });
+    const { routes, routeStats } = generateRoutes({ origin, profiles, flightType, maxLegNm, requiredApproachTypes });
     if (!routes.length) {
       throw new Error("No valid routes found for this setup. Expand distance or change origin/date.");
     }
@@ -221,7 +225,9 @@ formEl.addEventListener("submit", async (event) => {
       timeLocal,
       maxLegNm,
       requiredApproachTypes,
-      routes
+      routes,
+      candidateStats,
+      routeStats
     };
 
     selectedRouteIndex = 0;
@@ -444,20 +450,48 @@ async function buildAirportProfiles({
     .filter((a) => a.distanceFromOriginNm <= maxLegNm)
     .filter((a) => hasRunwayAtLeast(a.runways, 4000));
 
-  if (!candidates.length) return [];
+  if (!candidates.length) {
+    return {
+      profiles: [],
+      candidateStats: {
+        totalFilteredCandidates: 0,
+        profilePoolSizeUsed: 0
+      }
+    };
+  }
 
-  // Limit approach fetch volume to most relevant nearby airports.
-  const trimmed = candidates
-    .sort((a, b) => a.distanceFromOriginNm - b.distanceFromOriginNm)
-    .slice(0, flightType === "triple" ? 35 : 45);
+  let pool = [];
+  if (flightType === "single") {
+    pool = [...candidates]
+      .sort((a, b) => a.distanceFromOriginNm - b.distanceFromOriginNm)
+      .slice(0, SINGLE_PROFILE_POOL_SIZE);
+  } else {
+    const limit = flightType === "double" ? DOUBLE_PROFILE_POOL_SIZE : TRIPLE_PROFILE_POOL_SIZE;
+    pool = candidates
+      .map((airport) => ({
+        airport,
+        preScore: scoreAirportCandidateForPool(airport, flightType, maxLegNm)
+      }))
+      .sort((a, b) => b.preScore - a.preScore || a.airport.ident.localeCompare(b.airport.ident))
+      .slice(0, limit)
+      .map((row) => row.airport);
+  }
 
-  return mapWithConcurrency(trimmed, PROFILE_BUILD_CONCURRENCY, (airport) => buildAirportProfile({
+  const profiles = await mapWithConcurrency(pool, PROFILE_BUILD_CONCURRENCY, (airport) => buildAirportProfile({
     airport,
     origin,
     runwaysByAirport,
     flightDate,
     timeLocal
   }));
+
+  return {
+    profiles,
+    candidateStats: {
+      totalFilteredCandidates: candidates.length,
+      profilePoolSizeUsed: pool.length
+    }
+  };
 }
 
 async function buildAirportProfile({ airport, origin, runwaysByAirport, flightDate, timeLocal }) {
@@ -496,7 +530,7 @@ function generateRoutes({ origin, profiles, flightType, maxLegNm, requiredApproa
   const rules = FLIGHT_RULES[flightType];
 
   if (flightType === "single" || flightType === "double") {
-    const routes = profiles
+    const allRoutes = profiles
       .filter((p) => p.distanceFromOriginNm >= rules.legMin)
       .filter((p) => p.distanceFromOriginNm <= maxLegNm)
       .map((p) => {
@@ -520,13 +554,17 @@ function generateRoutes({ origin, profiles, flightType, maxLegNm, requiredApproa
           summary: `${origin.ident} -> ${p.ident} -> ${origin.ident}`
         };
       })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 10);
+      .sort((a, b) => b.score - a.score);
 
-    return routes;
+    return {
+      routes: allRoutes.slice(0, 10),
+      routeStats: {
+        preTopRouteCount: allRoutes.length
+      }
+    };
   }
 
-  const top = [...profiles].sort((a, b) => b.trainingScore - a.trainingScore).slice(0, 22);
+  const top = [...profiles].sort((a, b) => b.trainingScore - a.trainingScore).slice(0, TRIPLE_COMBINATOR_POOL_SIZE);
   const routes = [];
 
   for (let i = 0; i < top.length; i += 1) {
@@ -561,7 +599,13 @@ function generateRoutes({ origin, profiles, flightType, maxLegNm, requiredApproa
     }
   }
 
-  return routes.sort((a, b) => b.score - a.score).slice(0, 10);
+  routes.sort((a, b) => b.score - a.score);
+  return {
+    routes: routes.slice(0, 10),
+    routeStats: {
+      preTopRouteCount: routes.length
+    }
+  };
 }
 
 function scoreRoute({ stops, totalDistanceNm, flightType, maxLegNm, requiredApproachTypes = [] }) {
@@ -732,22 +776,21 @@ function classifyApproachTypes(name) {
 function evaluateAirportSuitability(airport) {
   const flags = [];
   const name = String(airport.name || "").toUpperCase();
+  const keywords = String(airport.keywords || "").toUpperCase();
+  const text = `${name} ${keywords}`;
   let penalty = 0;
   let scoreMultiplier = 1;
+  const hasNavy = /\bNAVAL\b|\bNAVY\b|\bNAVAL AIR STATION\b|\bNAS\b/.test(text);
+  const hasNonNavyMilitary = /\bAFB\b|AIR FORCE BASE|\bARMY\b|ARMY AIRFIELD|JOINT BASE|\bJB\b|\bMCAS\b|\bMILITARY\b|TEST RANGE|BOMBING|\bUSAF\b|\bUSMC\b/.test(text);
 
-  if (/AFB|AIR FORCE BASE/.test(name)) {
-    flags.push("Air Force Base operations likely");
+  if (hasNavy) {
+    flags.push("Navy operations likely");
+    penalty += 8;
+    scoreMultiplier *= 0.9;
+  } else if (hasNonNavyMilitary) {
+    flags.push("Non-Navy military operations likely (AFB-level deweighting applied)");
     penalty += 12;
     scoreMultiplier *= 0.75;
-  } else if (/ARMY AIRFIELD|NAVAL AIR STATION|NAS |MCAS|MILITARY|TEST RANGE|BOMBING/.test(name)) {
-    flags.push("Military operations likely");
-    penalty += 12;
-    scoreMultiplier *= 0.85;
-  }
-
-  if (/JOINT BASE|JB /.test(name)) {
-    flags.push("Joint-base operations likely");
-    penalty += 8;
   }
 
   if (/PRIVATE|PVT/.test(name)) {
@@ -850,6 +893,37 @@ function runwaySuitabilityPoints(row) {
 
 function hasRunwayAtLeast(runways, minFt) {
   return runways.some((r) => Number(r.lengthFt) >= minFt);
+}
+
+function scoreAirportCandidateForPool(airport, flightType, maxLegNm) {
+  const distance = Number(airport.distanceFromOriginNm) || 0;
+  const safeMax = Math.max(1, Number(maxLegNm) || 1);
+  const targetRatio = flightType === "double" ? 0.55 : 0.7;
+  const targetNm = safeMax * targetRatio;
+  const distanceScore = clamp(20 - Math.abs(distance - targetNm) / safeMax * 20, 0, 20);
+
+  const runways = airport.runways || [];
+  const runwayCount = runways.length;
+  const maxLength = runways.reduce((max, r) => Math.max(max, Number(r.lengthFt) || 0), 0);
+  const runwayInfraScore = clamp(runwayCount * 1.1 + clamp((maxLength - 4000) / 450, 0, 10), 0, 16);
+
+  const cachedApproaches = cache.approachesByAirport.get(airport.ident) || [];
+  const cachedChartBundle = cache.aviationChartsByAirport.get(airport.ident);
+  const cachedChartApproaches = cachedChartBundle?.approaches || [];
+  const cachedCombined = dedupeApproaches([...cachedApproaches, ...cachedChartApproaches]);
+  const cachedTypes = new Set();
+  for (const row of cachedCombined) {
+    for (const type of classifyApproachTypes(row.name)) {
+      if (!INCLUDE_TACAN_FOR_T6_SCORING && type === "TACAN") continue;
+      cachedTypes.add(type);
+    }
+  }
+
+  const approachPotentialScore = cachedCombined.length
+    ? clamp(cachedCombined.length * 0.85 + cachedTypes.size * 2.2, 0, 24)
+    : 12;
+
+  return distanceScore + runwayInfraScore + approachPotentialScore;
 }
 
 async function fetchApproaches(ident, supplementalCharts = null) {
@@ -1031,6 +1105,9 @@ function renderAll(model) {
   const needed = (model.requiredApproachTypes || []).length
     ? ` | Needed: ${(model.requiredApproachTypes || []).join(", ")}`
     : "";
+  const metrics = model.candidateStats && model.routeStats
+    ? `Candidates ${model.candidateStats.totalFilteredCandidates} | Profile pool ${model.candidateStats.profilePoolSizeUsed} | Generated ${model.routeStats.preTopRouteCount}`
+    : "";
   const summaryHtml = `
     <article class="summary">
       <div><strong>${model.origin.ident}</strong> | ${FLIGHT_RULES[model.flightType].label} | ${model.flightDate} ${model.timeLocal}</div>
@@ -1038,7 +1115,10 @@ function renderAll(model) {
         ${model.routes.length} route options ranked by training score (1-100).
         Surface winds are Open-Meteo 10m winds in knots.${needed}
       </div>
-      <div class="small">${model.usingFallback ? "Airport/runway dataset fallback enabled." : ""}</div>
+      <div class="small">
+        ${model.usingFallback ? "Airport/runway dataset fallback enabled. " : ""}
+        ${metrics}
+      </div>
     </article>
   `;
 
