@@ -1,6 +1,8 @@
 const ALLOWED_HOSTS = new Set([
   "raw.githubusercontent.com",
   "cdn.jsdelivr.net",
+  "ourairports.com",
+  "www.ourairports.com",
   "www.faa.gov",
   "faa.gov",
   "aeronav.faa.gov",

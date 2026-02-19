@@ -1,10 +1,12 @@
 const AIRPORTS_URLS = [
   "https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/airports.csv",
-  "https://cdn.jsdelivr.net/gh/davidmegginson/ourairports-data@main/airports.csv"
+  "https://cdn.jsdelivr.net/gh/davidmegginson/ourairports-data@main/airports.csv",
+  "https://ourairports.com/data/airports.csv"
 ];
 const RUNWAYS_URLS = [
   "https://raw.githubusercontent.com/davidmegginson/ourairports-data/main/runways.csv",
-  "https://cdn.jsdelivr.net/gh/davidmegginson/ourairports-data@main/runways.csv"
+  "https://cdn.jsdelivr.net/gh/davidmegginson/ourairports-data@main/runways.csv",
+  "https://ourairports.com/data/runways.csv"
 ];
 const OPEN_METEO_FORECAST = "https://api.open-meteo.com/v1/forecast";
 const OPEN_METEO_ARCHIVE = "https://archive-api.open-meteo.com/v1/archive";
@@ -12,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.7";
+const APP_VERSION = "0.0.9";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
@@ -348,31 +350,53 @@ async function loadCoreData() {
     return { airports: cache.airports, runwaysByAirport: cache.runwaysByAirport, usingFallback: true };
   }
 
-  const airports = airportRows
-    .filter((row) => {
-      const isUS = row.iso_country === "US";
-      const typeOk = ["small_airport", "medium_airport", "large_airport"].includes(row.type);
-      const ident = row.ident || "";
-      return isUS && typeOk && ident.startsWith("K");
-    })
-    .map((row) => ({
-      ident: row.ident,
-      name: row.name,
-      lat: Number(row.latitude_deg),
-      lon: Number(row.longitude_deg),
-      type: row.type,
-      elevationFt: Number(row.elevation_ft) || null,
-      scheduledService: String(row.scheduled_service || "").toLowerCase() === "yes",
-      keywords: String(row.keywords || "")
-    }))
-    .filter((a) => Number.isFinite(a.lat) && Number.isFinite(a.lon));
+  const airportsByIdent = new Map();
+  const sourceToCanonicalIdent = new Map();
 
-  const validAirportIdents = new Set(airports.map((a) => a.ident));
+  for (const row of airportRows) {
+    const isUS = row.iso_country === "US";
+    const typeOk = ["small_airport", "medium_airport", "large_airport"].includes(row.type);
+    if (!isUS || !typeOk) continue;
+
+    const sourceIdent = String(row.ident || "").trim().toUpperCase();
+    const canonicalIdent =
+      normalizeAirportCode(row.gps_code, row.iso_country) ||
+      normalizeAirportCode(row.ident, row.iso_country) ||
+      normalizeAirportCode(row.local_code, row.iso_country);
+
+    if (!sourceIdent || !canonicalIdent) continue;
+
+    const lat = Number(row.latitude_deg);
+    const lon = Number(row.longitude_deg);
+    if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+
+    if (!airportsByIdent.has(canonicalIdent)) {
+      airportsByIdent.set(canonicalIdent, {
+        ident: canonicalIdent,
+        name: row.name,
+        lat,
+        lon,
+        type: row.type,
+        elevationFt: Number(row.elevation_ft) || null,
+        scheduledService: String(row.scheduled_service || "").toLowerCase() === "yes",
+        keywords: String(row.keywords || "")
+      });
+    }
+
+    sourceToCanonicalIdent.set(sourceIdent, canonicalIdent);
+    const gpsCode = String(row.gps_code || "").trim().toUpperCase();
+    if (gpsCode) sourceToCanonicalIdent.set(gpsCode, canonicalIdent);
+    const localCode = String(row.local_code || "").trim().toUpperCase();
+    if (localCode) sourceToCanonicalIdent.set(localCode, canonicalIdent);
+  }
+
+  const airports = [...airportsByIdent.values()];
   const runwaysByAirport = new Map();
 
   for (const row of runwayRows) {
-    const ident = row.airport_ident;
-    if (!validAirportIdents.has(ident)) continue;
+    const sourceIdent = String(row.airport_ident || "").trim().toUpperCase();
+    const ident = sourceToCanonicalIdent.get(sourceIdent) || normalizeAirportCode(sourceIdent, "US");
+    if (!ident || !airportsByIdent.has(ident)) continue;
     if (String(row.closed || "").trim() === "1") continue;
 
     const runway = {
@@ -851,7 +875,7 @@ async function fetchApproaches(ident, supplementalCharts = null) {
     const mapped = dedupeApproaches(rows
       .map((r) => ({
         name: r.chart_name || r.chartName || "Approach",
-        pdf: r.pdf_path || r.pdfPath || null,
+        pdf: normalizeApproachPdfUrl(r.pdf_path || r.pdfPath || null, "https://api.aviationapi.com"),
         source: "AviationAPI JSON"
       }))
       .filter((r) => r.name)
@@ -896,8 +920,7 @@ async function fetchAviationHtmlCharts(ident) {
       if (!name || name.toUpperCase().includes("CHART NAME")) continue;
 
       let pdf = firstLink?.getAttribute("href") || null;
-      if (pdf && pdf.startsWith("/")) pdf = `https://www.aviationapi.com${pdf}`;
-      if (pdf && !pdf.startsWith("http")) pdf = null;
+      pdf = normalizeApproachPdfUrl(pdf, "https://www.aviationapi.com");
 
       allCharts.push({ name, pdf, section, source: "AviationAPI HTML" });
     }
@@ -1463,6 +1486,17 @@ function inferTowered(airport) {
   return /TOWER|ATCT/.test(text);
 }
 
+function normalizeAirportCode(value, isoCountry = "US") {
+  const raw = String(value || "").trim().toUpperCase();
+  if (!raw) return null;
+  const lettersDigits = raw.replace(/[^A-Z0-9]/g, "");
+  if (!lettersDigits) return null;
+
+  if (/^[A-Z]{4}$/.test(lettersDigits)) return lettersDigits;
+  if (isoCountry === "US" && /^[A-Z0-9]{3}$/.test(lettersDigits)) return `K${lettersDigits}`;
+  return null;
+}
+
 function normalizeRunwayIdent(value) {
   if (!value) return null;
   const raw = String(value).trim().toUpperCase();
@@ -1577,6 +1611,19 @@ function buildFetchCandidates(url) {
   out.push(`/api/proxy?url=${encoded}`);
   out.push(url);
   return out;
+}
+
+function normalizeApproachPdfUrl(value, baseUrl = "") {
+  const raw = String(value || "").trim();
+  if (!raw) return null;
+  if (/^https?:\/\//i.test(raw)) return raw;
+
+  const cleanedBase = String(baseUrl || "").replace(/\/+$/, "");
+  const cleanedValue = raw.replace(/^\/+/, "");
+  if (!cleanedBase) return null;
+  if (!cleanedValue) return null;
+
+  return `${cleanedBase}/${cleanedValue}`;
 }
 
 function parseCsv(text) {
