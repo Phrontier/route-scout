@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.10";
+const APP_VERSION = "0.0.11";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
@@ -335,8 +335,12 @@ async function loadCoreData() {
 
   try {
     const [airportsCsv, runwaysCsv] = await Promise.all([
-      fetchTextFromAny(AIRPORTS_URLS),
-      fetchTextFromAny(RUNWAYS_URLS)
+      fetchTextFromAny(AIRPORTS_URLS, {
+        validateText: (text) => looksLikeCsvWithHeaders(text, ["ident", "latitude_deg", "longitude_deg", "iso_country", "type"])
+      }),
+      fetchTextFromAny(RUNWAYS_URLS, {
+        validateText: (text) => looksLikeCsvWithHeaders(text, ["airport_ident", "length_ft", "le_ident", "he_ident"])
+      })
     ]);
     airportRows = parseCsv(airportsCsv);
     runwayRows = parseCsv(runwaysCsv);
@@ -1562,7 +1566,8 @@ function shuffleCopy(list) {
   return arr;
 }
 
-async function fetchTextFromAny(urls) {
+async function fetchTextFromAny(urls, options = {}) {
+  const { validateText = null } = options;
   let lastError = null;
   const expanded = urls.flatMap((url) => buildFetchCandidates(url));
 
@@ -1570,7 +1575,11 @@ async function fetchTextFromAny(urls) {
     try {
       const response = await fetch(url, { cache: "no-store" });
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      return await response.text();
+      const text = await response.text();
+      if (validateText && !validateText(text)) {
+        throw new Error("Response failed validation");
+      }
+      return text;
     } catch (error) {
       lastError = error;
     }
@@ -1580,12 +1589,21 @@ async function fetchTextFromAny(urls) {
 }
 
 async function fetchJsonFromAny(urls) {
-  const text = await fetchTextFromAny(urls);
-  try {
-    return JSON.parse(text);
-  } catch (_error) {
-    throw new Error("Invalid JSON response");
+  let lastError = null;
+  const expanded = urls.flatMap((url) => buildFetchCandidates(url));
+
+  for (const url of expanded) {
+    try {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const text = await response.text();
+      return JSON.parse(text);
+    } catch (error) {
+      lastError = error;
+    }
   }
+
+  throw lastError || new Error("Invalid JSON response");
 }
 
 function buildFetchCandidates(url) {
@@ -1624,6 +1642,21 @@ function normalizeApproachPdfUrl(value, baseUrl = "") {
   if (!cleanedValue) return null;
 
   return `${cleanedBase}/${cleanedValue}`;
+}
+
+function looksLikeCsvWithHeaders(text, requiredHeaders = []) {
+  const sample = String(text || "").slice(0, 1200);
+  if (!sample || sample.length < 40) return false;
+  if (/^\s*</.test(sample)) return false;
+
+  const headerLine = sample.split(/\r?\n/, 1)[0] || "";
+  const normalized = headerLine
+    .replace(/^\uFEFF/, "")
+    .split(",")
+    .map((v) => String(v).trim().replace(/^"|"$/g, ""));
+
+  if (!normalized.length) return false;
+  return requiredHeaders.every((header) => normalized.includes(header));
 }
 
 function parseCsv(text) {
