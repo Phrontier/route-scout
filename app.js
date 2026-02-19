@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.13";
+const APP_VERSION = "0.0.14";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
@@ -1080,17 +1080,19 @@ function renderAll(model) {
 function stopOverviewHtml(stop) {
   const runway = stop.likelyRunway;
   const displayTypes = stop.approachStats.typesLikely.filter((t) => INCLUDE_TACAN_FOR_T6_SCORING || t !== "TACAN");
-  const types = displayTypes.length ? displayTypes.join(", ") : "None detected";
+  const types = displayTypes.length ? displayTypes.slice(0, 4).join(", ") : "None";
   const runwayBand = runway ? runway.highlightBand : "red";
   const hasWarnings = stop.suitability.flags.length > 0;
 
   return `
     <div class="overview-row">
-      <div><strong>${stop.ident}</strong> (${stop.name || ""})</div>
-      <div class="subtle">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</div>
-      <div class="subtle"><span class="dot dot-${runwayBand}"></span> Likely RWY ${runway ? runway.runwayIdent : "N/A"} ${runway ? `(${runway.lengthFt}x${runway.widthFt || "?"} ft)` : ""}</div>
-      <div class="subtle">Approach types: ${types}</div>
-      ${hasWarnings ? `<div class="small warning">Operational caution: ${escapeHtml(stop.suitability.flags[0])}. Check IFR supplement for PPR/remarks.</div>` : ""}
+      <div class="overview-line">
+        <strong>${stop.ident}</strong>
+        <span class="subtle">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
+        <span class="subtle"><span class="dot dot-${runwayBand}"></span> RWY ${runway ? runway.runwayIdent : "N/A"}</span>
+        <span class="subtle">Types: ${types}</span>
+      </div>
+      ${hasWarnings ? `<div class="small warning">Caution: ${escapeHtml(stop.suitability.flags[0])}. Check IFR supplement for PPR/remarks.</div>` : ""}
     </div>
   `;
 }
@@ -1100,46 +1102,48 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
     .map((leg) => `<div class="leg-row"><span>${leg.from} -> ${leg.to}</span><span>${leg.distanceNm.toFixed(1)} NM</span></div>`)
     .join("");
 
-  const focusAirfields = [originProfile, ...route.stops];
-
-  const focusCards = focusAirfields
+  const focusCards = route.stops
     .map((airport, index) => {
-      const label = index === 0
-        ? "Home / Return Airfield"
-        : `Training Airfield ${index + 1}`;
-      return airfieldSummaryCardHtml(airport, label);
+      return airfieldSummaryCardHtml(airport, `Destination ${index + 1}`);
     })
     .join("");
-
-  const detailCards = route.stops
-    .map((stop, idx) => airfieldDetailCardHtml(stop, `Destination Detail ${idx + 1}`))
-    .join("\n");
-
-  const homeDetailCard = airfieldDetailCardHtml(originProfile, "Home Field Detail");
 
   return `
     <div class="route-inline-detail">
       <h3>Selected Route Detail</h3>
-      <div class="card mb-3">
+      <div class="card mb-3 route-detail-shell">
         <div class="card-body">
           <div class="row g-3">
-            <div class="col-lg-5">
+            <div class="col-lg-4">
               <h5 class="mb-2">Mission Plan</h5>
               <div class="leg-list">${legRows}</div>
             </div>
-            <div class="col-lg-7">
-              <h5 class="mb-2">Primary Airfields</h5>
-              <div class="row g-2">${focusCards}</div>
+            <div class="col-lg-8">
+              <h5 class="mb-2">Airfield Summary</h5>
+              <div class="row g-2">
+                ${airfieldSummaryCardHtml(originProfile, "Home Field")}
+                ${focusCards}
+              </div>
             </div>
+          </div>
+          <div class="map-wrap">
+            <strong>Route Quick Map</strong>
+            <div id="${mapId}" class="route-map"></div>
           </div>
         </div>
       </div>
-      <div class="map-wrap">
-        <strong>Route Quick Map</strong>
-        <div id="${mapId}" class="route-map"></div>
+      <div class="detail-stack">
+        <details class="detail-collapsible" open>
+          <summary>Home Field Detail</summary>
+          ${airfieldDetailCardHtml(originProfile, "Home Field")}
+        </details>
+        ${route.stops.map((stop, idx) => `
+          <details class="detail-collapsible" ${idx === 0 ? "open" : ""}>
+            <summary>Destination Detail ${idx + 1}: ${stop.ident}</summary>
+            ${airfieldDetailCardHtml(stop, `Destination ${idx + 1}`)}
+          </details>
+        `).join("")}
       </div>
-      ${homeDetailCard}
-      ${detailCards}
     </div>
   `;
 }
@@ -1191,43 +1195,42 @@ function airfieldDetailCardHtml(stop, title) {
           <span>Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
           <span>Likely RWY ${stop.likelyRunway ? stop.likelyRunway.runwayIdent : "N/A"}</span>
         </div>
-        <div class="combined-mini row g-2">
-          <div class="col-12">
-            <div class="airfield-mini-info">
-              <strong>Airfield Mini Info</strong>
-              <div class="small">Towered: ${towered ? "Yes" : "No"}</div>
-              <div class="small">Lighting: ${hasLighting ? "Available" : "Unknown/Unlit"} | Elev: ${stop.elevationFt ?? "N/A"} ft</div>
-              <div class="small">Service: ${stop.scheduledService ? "Scheduled" : "Non-scheduled"}</div>
-              <div class="small mt-1"><strong>Available Runways</strong></div>
-              <ul class="small runway-list-mini">${runwaysList || "<li>No runway records</li>"}</ul>
-            </div>
+        <details class="subsection" open>
+          <summary>Primary Runway Approaches</summary>
+          <div class="approaches">
+            ${filteredLikely.length
+              ? `<ul>${filteredLikely.map((a) => `<li>${approachLinkHtml(a)}</li>`).join("")}</ul>`
+              : "<div class=\"small\">No approach chart metadata returned.</div>"}
           </div>
-        </div>
-        <div class="approach-columns row g-2">
-          <div class="col-md-6">
-            <div class="approaches">
-              <strong>Likely runway approaches</strong>
-              ${filteredLikely.length
-                ? `<ul>${filteredLikely.map((a) => `<li>${approachLinkHtml(a)}</li>`).join("")}</ul>`
-                : "<div class=\"small\">No approach chart metadata returned.</div>"}
-            </div>
+        </details>
+        <details class="subsection">
+          <summary>Other Available Approaches</summary>
+          <div class="approaches alt-approaches">
+            ${filteredAlternate.length
+              ? `<ul>${filteredAlternate.map((a) => `<li>${approachLinkHtml(a)}</li>`).join("")}</ul>`
+              : "<div class=\"small\">No additional approaches found.</div>"}
           </div>
-          <div class="col-md-6">
-            <div class="approaches alt-approaches">
-              <strong>Other available approaches</strong>
-              ${filteredAlternate.length
-                ? `<ul>${filteredAlternate.map((a) => `<li>${approachLinkHtml(a)}</li>`).join("")}</ul>`
-                : "<div class=\"small\">No additional approaches found.</div>"}
-            </div>
+        </details>
+        <details class="subsection">
+          <summary>Airfield Operational Notes</summary>
+          <div class="airfield-mini-info">
+            <div class="small">Towered: ${towered ? "Yes" : "No"}</div>
+            <div class="small">Lighting: ${hasLighting ? "Available" : "Unknown/Unlit"} | Elev: ${stop.elevationFt ?? "N/A"} ft</div>
+            <div class="small">Service: ${stop.scheduledService ? "Scheduled" : "Non-scheduled"}</div>
+            <div class="small mt-1"><strong>Available Runways</strong></div>
+            <ul class="small runway-list-mini">${runwaysList || "<li>No runway records</li>"}</ul>
+            ${stop.approachStats.hasRadarMinimums ? "<div class=\"small\">Radar minimums published: GCA training capability available.</div>" : ""}
+            ${stop.suitability.flags.length ? `<div class="small warning">Suitability flags: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
           </div>
-        </div>
-        <div class="small mt-2">
-          Score: diversity ${Math.round(stop.scoreBreakdown.diversity)}, quantity ${Math.round(stop.scoreBreakdown.quantity)}, wind ${Math.round(stop.scoreBreakdown.wind)}, runway ${Math.round(stop.scoreBreakdown.runway)}, suitability penalty ${Math.round(stop.scoreBreakdown.suitabilityPenalty)}.
-        </div>
-        ${stop.approachStats.hasRadarMinimums ? "<div class=\"small\">Radar minimums published: GCA training capability available.</div>" : ""}
-        ${stop.suitability.flags.length ? `<div class="small warning">Suitability flags: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
-        <div class="small">Approach data source: ${approachSources.length ? approachSources.join(", ") : "Unavailable"}</div>
-        ${!INCLUDE_TACAN_FOR_T6_SCORING ? "<div class=\"small\">TACAN approaches are available in backend data but excluded from T-6 scoring/output.</div>" : ""}
+        </details>
+        <details class="subsection">
+          <summary>Scoring and Data Source</summary>
+          <div class="small detail-footer">
+            <div>Score: diversity ${Math.round(stop.scoreBreakdown.diversity)}, quantity ${Math.round(stop.scoreBreakdown.quantity)}, wind ${Math.round(stop.scoreBreakdown.wind)}, runway ${Math.round(stop.scoreBreakdown.runway)}, suitability penalty ${Math.round(stop.scoreBreakdown.suitabilityPenalty)}.</div>
+            <div>Approach data source: ${approachSources.length ? approachSources.join(", ") : "Unavailable"}</div>
+            ${!INCLUDE_TACAN_FOR_T6_SCORING ? "<div>TACAN approaches are available in backend data but excluded from T-6 scoring/output.</div>" : ""}
+          </div>
+        </details>
       </div>
     </article>
   `;
@@ -1287,109 +1290,6 @@ function approachLinkHtml(approach) {
   const label = escapeHtml(approach.name);
   if (!approach.pdf) return label;
   return `<a href="${approach.pdf}" target="_blank" rel="noopener noreferrer">${label}</a>`;
-}
-
-function renderRunwayMiniView(runways, likelyRunwayIdent, wind) {
-  if (!runways.length) return "<div class=\"small\">No runway geometry available.</div>";
-
-  const centerX = 86;
-  const centerY = 96;
-  const maxRadius = 72;
-  const lines = [];
-  const candidates = runways
-    .slice(0, 14)
-    .map((runway) => {
-      const ends = (runway.ends || []).filter((e) => Number.isFinite(e.heading));
-      if (!ends.length) return null;
-      const a = ends[0];
-      const b = ends[1] || null;
-      const heading = normalizeHeading(a.heading) % 180;
-      return { runway, a, b, headingBucket: Math.round(heading / 2) * 2 };
-    })
-    .filter(Boolean);
-
-  const grouped = new Map();
-  for (const item of candidates) {
-    if (!grouped.has(item.headingBucket)) grouped.set(item.headingBucket, []);
-    grouped.get(item.headingBucket).push(item);
-  }
-
-  for (const groupItems of grouped.values()) {
-    for (let i = 0; i < groupItems.length; i += 1) {
-      const item = groupItems[i];
-      const angle = degToRad((item.a.heading - 90 + 360) % 360);
-      const sideOffset = runwaySideOffset(item.a.ident);
-      const siblingOffset = (i - (groupItems.length - 1) / 2) * 4;
-      const normalX = -Math.sin(angle);
-      const normalY = Math.cos(angle);
-      const lateral = sideOffset + siblingOffset;
-
-      const scale = clamp((item.runway.lengthFt || 4000) / 12000, 0.25, 1);
-      const half = maxRadius * scale;
-      const cx = centerX + normalX * lateral;
-      const cy = centerY + normalY * lateral;
-
-      const x1 = cx - Math.cos(angle) * half;
-      const y1 = cy - Math.sin(angle) * half;
-      const x2 = cx + Math.cos(angle) * half;
-      const y2 = cy + Math.sin(angle) * half;
-
-      const likely = [item.a.ident, item.b?.ident]
-        .map((v) => normalizeRunwayIdent(v))
-        .includes(normalizeRunwayIdent(likelyRunwayIdent));
-
-      lines.push(`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" class="mini-line${likely ? " likely" : ""}" />`);
-      lines.push(`<text x="${(x2 + 2).toFixed(1)}" y="${(y2 - 2).toFixed(1)}" class="mini-label">${escapeHtml(item.a.ident || "")}</text>`);
-      if (item.b?.ident) {
-        lines.push(`<text x="${(x1 + 2).toFixed(1)}" y="${(y1 - 2).toFixed(1)}" class="mini-label">${escapeHtml(item.b.ident)}</text>`);
-      }
-    }
-  }
-
-  const windArrow = buildWindArrowSvg(wind, centerX, centerY);
-
-  return `
-    <svg class="mini-runway-svg" viewBox="-20 -10 280 230" role="img" aria-label="Mini runway layout">
-      <defs>
-        <marker id="wind-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
-          <path d="M 0 0 L 10 5 L 0 10 z" fill="#174566"></path>
-        </marker>
-      </defs>
-      <circle cx="${centerX}" cy="${centerY}" r="80" class="mini-bg"></circle>
-      ${lines.join("")}
-      ${windArrow}
-    </svg>
-  `;
-}
-
-function runwaySideOffset(ident) {
-  const side = String(ident || "").toUpperCase().slice(-1);
-  if (side === "L") return -6;
-  if (side === "R") return 6;
-  if (side === "C") return 0;
-  return 0;
-}
-
-function buildWindArrowSvg(wind, centerX, centerY) {
-  if (!wind) return "";
-  const bearing = Number(wind.directionDeg);
-  if (!Number.isFinite(bearing)) return "";
-
-  // Keep wind indicator in a dedicated right-side lane to avoid overlapping runway labels.
-  const laneX = centerX + 122;
-  const laneY = centerY - 22;
-  const rad = degToRad((bearing - 90 + 360) % 360);
-  const length = 28;
-  const x1 = laneX - Math.cos(rad) * length * 0.5;
-  const y1 = laneY - Math.sin(rad) * length * 0.5;
-  const x2 = laneX + Math.cos(rad) * length * 0.5;
-  const y2 = laneY + Math.sin(rad) * length * 0.5;
-
-  return `
-    <text x="${(laneX - 26).toFixed(1)}" y="${(laneY - 20).toFixed(1)}" class="wind-text">Wind</text>
-    <line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" class="wind-arrow"></line>
-    <text x="${(laneX - 42).toFixed(1)}" y="${(laneY + 22).toFixed(1)}" class="wind-text">${Math.round(wind.directionDeg)}@${Math.round(wind.speedKt)}kt</text>
-  `;
 }
 
 function mapContainerId(route) {
