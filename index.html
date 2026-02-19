@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>IFR Training Route Planner</title>
+    <link rel="stylesheet" href="bootstrap-5.3.8-dist/css/bootstrap.min.css" />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+      crossorigin=""
+    />
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <header>
+        <h1>Instrument Training Route Planner</h1>
+        <p>Generate and compare multiple IFR training routes by runway wind fit and approach training value.</p>
+      </header>
+
+      <section class="panel">
+        <form id="planner-form" class="planner-form">
+          <label class="field-origin">
+            Origin ICAO
+            <input id="origin" name="origin" type="text" maxlength="4" placeholder="KSQL" required />
+          </label>
+
+          <label class="field-date">
+            Flight Date
+            <input id="flight-date" name="flightDate" type="date" required />
+          </label>
+
+          <label class="field-type">
+            Flight Type
+            <select id="flight-type" name="flightType" required>
+              <option value="single">Single</option>
+              <option value="double">Double</option>
+              <option value="triple">Triple</option>
+            </select>
+          </label>
+
+          <label class="field-time">
+            Takeoff Time (Local)
+            <input id="time-local" name="timeLocal" type="time" value="12:00" required />
+          </label>
+
+          <label class="slider-label field-distance">
+            Max Leg Distance: <span id="distance-value">100 NM</span>
+            <input id="max-distance" name="maxDistance" type="range" min="50" max="150" value="100" step="5" />
+          </label>
+
+          <fieldset class="approach-needs field-approaches">
+            <legend class="small mb-2">Required Approach Types (Weighted)</legend>
+            <div class="approach-grid">
+              <label><input type="checkbox" id="all-approaches" name="approachTypeAll" checked /> All options</label>
+              <label><input type="checkbox" name="approachType" value="ILS" /> ILS</label>
+              <label><input type="checkbox" name="approachType" value="LOC" /> LOC</label>
+              <label><input type="checkbox" name="approachType" value="RNAV" /> RNAV/GPS</label>
+              <label><input type="checkbox" name="approachType" value="VOR" /> VOR</label>
+              <label><input type="checkbox" name="approachType" value="NDB" /> NDB</label>
+              <label><input type="checkbox" name="approachType" value="GCA" /> GCA</label>
+              <label><input type="checkbox" name="approachType" value="CIRCLING" /> Circling</label>
+            </div>
+          </fieldset>
+          <p id="distance-help" class="small field-help"></p>
+
+          <div class="form-actions">
+            <button id="generate-btn" type="submit">Generate Routes</button>
+          </div>
+        </form>
+
+        <p class="note">
+          Airport filter: at least one runway >= 4000 ft. Contract fuel is not hard-filtered; verify manually.
+        </p>
+      </section>
+
+      <section id="status" class="status">Enter route details and click "Generate Routes".</section>
+      <section id="results" class="results"></section>
+    </main>
+
+    <script src="bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js"></script>
+    <script
+      src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+      integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+      crossorigin=""
+    ></script>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
