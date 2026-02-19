@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.16";
+const APP_VERSION = "0.0.17";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
@@ -265,8 +265,10 @@ function updateDistanceControl(flightType) {
 
 function setStatus(text, isError = false, isLoading = false) {
   statusEl.textContent = text;
-  statusEl.classList.toggle("error", Boolean(isError));
-  statusEl.classList.toggle("loading", Boolean(isLoading));
+  statusEl.classList.remove("alert-info", "alert-danger", "alert-warning");
+  statusEl.classList.add(isError ? "alert-danger" : "alert-info");
+  if (isLoading) statusEl.classList.add("rs-status-loading");
+  else statusEl.classList.remove("rs-status-loading");
 }
 
 function syncApproachTypeUI() {
@@ -1109,15 +1111,17 @@ function renderAll(model) {
     ? `Candidates ${model.candidateStats.totalFilteredCandidates} | Profile pool ${model.candidateStats.profilePoolSizeUsed} | Generated ${model.routeStats.preTopRouteCount}`
     : "";
   const summaryHtml = `
-    <article class="summary">
-      <div><strong>${model.origin.ident}</strong> | ${FLIGHT_RULES[model.flightType].label} | ${model.flightDate} ${model.timeLocal}</div>
-      <div class="subtle">
-        ${model.routes.length} route options ranked by training score (1-100).
-        Surface winds are Open-Meteo 10m winds in knots.${needed}
-      </div>
-      <div class="small">
-        ${model.usingFallback ? "Airport/runway dataset fallback enabled. " : ""}
-        ${metrics}
+    <article class="card border-0 shadow-sm">
+      <div class="card-body py-3">
+        <div class="fw-semibold">${model.origin.ident} | ${FLIGHT_RULES[model.flightType].label} | ${model.flightDate} ${model.timeLocal}</div>
+        <div class="small text-secondary mt-1">
+          ${model.routes.length} route options ranked by training score (1-100).
+          Surface winds are Open-Meteo 10m winds in knots.${needed}
+        </div>
+        <div class="small text-secondary mt-1">
+          ${model.usingFallback ? "Airport/runway dataset fallback enabled. " : ""}
+          ${metrics}
+        </div>
       </div>
     </article>
   `;
@@ -1125,35 +1129,37 @@ function renderAll(model) {
   const listHtml = model.routes
     .map((route, index) => {
       const band = scoreBand(route.score);
-      const selectedClass = index === selectedRouteIndex ? " route-card-selected" : "";
+      const selectedClass = index === selectedRouteIndex ? " rs-route-selected" : "";
       const expandedHtml = index === selectedRouteIndex
         ? routeDetailInlineHtml(route, model.origin, model.originProfile, mapContainerId(route))
         : "";
       return `
-        <article class="route-card${selectedClass}">
-          <div class="route-head">
-            <div>
-              <h3>Option ${index + 1}: ${route.summary}</h3>
-              <div class="subtle">${route.totalDistanceNm.toFixed(1)} NM total | ${route.legs.length} legs</div>
+        <article class="card border-0 shadow-sm${selectedClass}">
+          <div class="card-body">
+            <div class="d-flex align-items-start justify-content-between gap-3">
+              <div>
+                <h3 class="h5 mb-1">Option ${index + 1}: ${route.summary}</h3>
+                <div class="small text-secondary">${route.totalDistanceNm.toFixed(1)} NM total | ${route.legs.length} legs</div>
+              </div>
+              <div class="badge rs-score-badge rs-score-${band}">${route.score}</div>
             </div>
-            <div class="route-score score-${band}">${route.score}</div>
-          </div>
 
-          <div class="route-overview">
+            <div class="vstack gap-2 my-3">
             ${route.stops.map((stop) => stopOverviewHtml(stop)).join("")}
-          </div>
+            </div>
 
-          <div>
+            <div>
             ${index === selectedRouteIndex
-              ? "<span class=\"small\">Selected</span>"
-              : `<button class=\"secondary\" data-route-index=\"${index}\">Show More</button>`}
+              ? "<span class=\"badge text-bg-secondary\">Selected</span>"
+              : `<button class="btn btn-outline-primary btn-sm" data-route-index="${index}">Show More</button>`}
+            </div>
+            ${expandedHtml}
           </div>
-          ${expandedHtml}
         </article>
       `;
     })
     .join("\n");
-  resultsEl.innerHTML = summaryHtml + `<section class="route-grid">${listHtml}</section>`;
+  resultsEl.innerHTML = summaryHtml + `<section class="vstack gap-3">${listHtml}</section>`;
   if (selected) renderRouteMap(selected, model.origin, mapContainerId(selected));
 }
 
@@ -1165,21 +1171,23 @@ function stopOverviewHtml(stop) {
   const hasWarnings = stop.suitability.flags.length > 0;
 
   return `
-    <div class="overview-row">
-      <div class="overview-line">
+    <div class="card bg-light-subtle border">
+      <div class="card-body py-2 px-3">
+        <div class="d-flex flex-wrap gap-3 align-items-center small">
         <strong>${stop.ident}</strong>
-        <span class="subtle">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
-        <span class="subtle"><span class="dot dot-${runwayBand}"></span> RWY ${runway ? runway.runwayIdent : "N/A"}</span>
-        <span class="subtle">Types: ${types}</span>
+          <span class="text-secondary">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
+          <span class="text-secondary"><span class="rs-dot rs-dot-${runwayBand}"></span> RWY ${runway ? runway.runwayIdent : "N/A"}</span>
+          <span class="text-secondary">Types: ${types}</span>
+        </div>
+        ${hasWarnings ? `<div class="small text-warning-emphasis mt-1">Caution: ${escapeHtml(stop.suitability.flags[0])}. Check IFR supplement for PPR/remarks.</div>` : ""}
       </div>
-      ${hasWarnings ? `<div class="small warning">Caution: ${escapeHtml(stop.suitability.flags[0])}. Check IFR supplement for PPR/remarks.</div>` : ""}
     </div>
   `;
 }
 
 function routeDetailInlineHtml(route, origin, originProfile, mapId) {
   const legRows = route.legs
-    .map((leg) => `<div class="leg-row"><span>${leg.from} -> ${leg.to}</span><span>${leg.distanceNm.toFixed(1)} NM</span></div>`)
+    .map((leg) => `<li class="list-group-item d-flex justify-content-between"><span>${leg.from} -> ${leg.to}</span><span>${leg.distanceNm.toFixed(1)} NM</span></li>`)
     .join("");
 
   const focusCards = route.stops
@@ -1189,14 +1197,14 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
     .join("");
 
   return `
-    <div class="route-inline-detail">
-      <h3>Selected Route Detail</h3>
-      <div class="card mb-3 route-detail-shell">
+    <div class="mt-3 pt-3 border-top">
+      <h3 class="h5 mb-3">Selected Route Detail</h3>
+      <div class="card border">
         <div class="card-body">
           <div class="row g-3">
             <div class="col-lg-4">
               <h5 class="mb-2">Mission Plan</h5>
-              <div class="leg-list">${legRows}</div>
+              <ul class="list-group list-group-flush rs-leg-list">${legRows}</ul>
             </div>
             <div class="col-lg-8">
               <h5 class="mb-2">Airfield Summary</h5>
@@ -1206,22 +1214,34 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
               </div>
             </div>
           </div>
-          <div class="map-wrap">
-            <strong>Route Quick Map</strong>
-            <div id="${mapId}" class="route-map"></div>
+          <div class="mt-3">
+            <div class="fw-semibold mb-2">Route Quick Map</div>
+            <div id="${mapId}" class="rs-route-map border rounded-3"></div>
           </div>
         </div>
       </div>
-      <div class="detail-stack">
-        <details class="detail-collapsible" open>
-          <summary>Home Field Detail</summary>
-          ${airfieldDetailCardHtml(originProfile, "Home Field")}
-        </details>
+      <div class="accordion mt-3" id="route-detail-${mapId}">
+        <div class="accordion-item">
+          <h2 class="accordion-header" id="heading-home-${mapId}">
+            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-home-${mapId}" aria-expanded="true" aria-controls="collapse-home-${mapId}">
+              Home Field Detail
+            </button>
+          </h2>
+          <div id="collapse-home-${mapId}" class="accordion-collapse collapse show" aria-labelledby="heading-home-${mapId}">
+            <div class="accordion-body">${airfieldDetailCardHtml(originProfile, "Home Field", `${mapId}-home`)}</div>
+          </div>
+        </div>
         ${route.stops.map((stop, idx) => `
-          <details class="detail-collapsible" ${idx === 0 ? "open" : ""}>
-            <summary>Destination Detail ${idx + 1}: ${stop.ident}</summary>
-            ${airfieldDetailCardHtml(stop, `Destination ${idx + 1}`)}
-          </details>
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="heading-dest-${idx}-${mapId}">
+              <button class="accordion-button ${idx === 0 ? "" : "collapsed"}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-dest-${idx}-${mapId}" aria-expanded="${idx === 0 ? "true" : "false"}" aria-controls="collapse-dest-${idx}-${mapId}">
+                Destination Detail ${idx + 1}: ${stop.ident}
+              </button>
+            </h2>
+            <div id="collapse-dest-${idx}-${mapId}" class="accordion-collapse collapse ${idx === 0 ? "show" : ""}" aria-labelledby="heading-dest-${idx}-${mapId}">
+              <div class="accordion-body">${airfieldDetailCardHtml(stop, `Destination ${idx + 1}`, `${mapId}-dest-${idx}`)}</div>
+            </div>
+          </div>
         `).join("")}
       </div>
     </div>
@@ -1237,18 +1257,20 @@ function airfieldSummaryCardHtml(airport, label) {
     .join(", ");
   return `
     <div class="col-md-6">
-      <div class="airfield-chip">
-        <div class="small text-uppercase">${label}</div>
-        <div><strong>${airport.ident}</strong> ${airport.name ? `- ${escapeHtml(airport.name)}` : ""}</div>
-        <div class="small"><span class="dot dot-${band}"></span> ${airport.wind.directionDeg.toFixed(0)}° @ ${airport.wind.speedKt.toFixed(0)} kt</div>
-        <div class="small">Likely RWY ${runway ? runway.runwayIdent : "N/A"} ${runway ? `(${runway.lengthFt}x${runway.widthFt || "?"} ft)` : ""}</div>
-        <div class="small">Approach set: ${approachTypes || "None detected"}</div>
+      <div class="card h-100 border">
+        <div class="card-body py-2">
+          <div class="small text-uppercase text-secondary">${label}</div>
+          <div><strong>${airport.ident}</strong> ${airport.name ? `- ${escapeHtml(airport.name)}` : ""}</div>
+          <div class="small text-secondary"><span class="rs-dot rs-dot-${band}"></span> ${airport.wind.directionDeg.toFixed(0)}° @ ${airport.wind.speedKt.toFixed(0)} kt</div>
+          <div class="small text-secondary">Likely RWY ${runway ? runway.runwayIdent : "N/A"} ${runway ? `(${runway.lengthFt}x${runway.widthFt || "?"} ft)` : ""}</div>
+          <div class="small text-secondary">Approach set: ${approachTypes || "None detected"}</div>
+        </div>
       </div>
     </div>
   `;
 }
 
-function airfieldDetailCardHtml(stop, title) {
+function airfieldDetailCardHtml(stop, title, keySuffix = "") {
   const likelyApproaches = stop.approachStats.selectedApproaches;
   const alternateApproaches = stop.approachStats.alternateApproaches;
   const runwayBand = stop.likelyRunway ? stop.likelyRunway.highlightBand : "red";
@@ -1264,53 +1286,83 @@ function airfieldDetailCardHtml(stop, title) {
     .join("");
   const towered = inferTowered(stop);
   const hasLighting = (stop.runways || []).some((r) => r.lighted);
+  const accordionId = `airfield-sections-${String(stop.ident || "apt").toLowerCase()}-${keySuffix}`;
 
   return `
-    <article class="detail-card card">
-      <div class="card-body">
-        <h4>${title}: ${stop.ident}</h4>
-        <div class="detail-meta">
-          <span class="dot dot-${runwayBand}"></span>
-          <span>Training Score ${stop.trainingScore}</span>
-          <span>Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
-          <span>Likely RWY ${stop.likelyRunway ? stop.likelyRunway.runwayIdent : "N/A"}</span>
+    <article class="card border-0 shadow-sm">
+      <div class="card-body p-3">
+        <h4 class="h6 mb-2">${title}: ${stop.ident}</h4>
+        <div class="d-flex flex-wrap gap-2 mb-3 small text-secondary">
+          <span class="badge text-bg-light border"><span class="rs-dot rs-dot-${runwayBand}"></span> Training Score ${stop.trainingScore}</span>
+          <span class="badge text-bg-light border">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
+          <span class="badge text-bg-light border">Likely RWY ${stop.likelyRunway ? stop.likelyRunway.runwayIdent : "N/A"}</span>
         </div>
-        <details class="subsection" open>
-          <summary>Primary Runway Approaches</summary>
-          <div class="approaches">
+
+        <div class="accordion" id="${accordionId}">
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="primary-heading-${accordionId}">
+              <button class="accordion-button py-2" type="button" data-bs-toggle="collapse" data-bs-target="#primary-body-${accordionId}" aria-expanded="true" aria-controls="primary-body-${accordionId}">
+                Primary Runway Approaches
+              </button>
+            </h2>
+            <div id="primary-body-${accordionId}" class="accordion-collapse collapse show" aria-labelledby="primary-heading-${accordionId}">
+              <div class="accordion-body">
             ${filteredLikely.length
-              ? `<ul>${filteredLikely.map((a) => `<li>${approachLinkHtml(a)}</li>`).join("")}</ul>`
-              : "<div class=\"small\">No approach chart metadata returned.</div>"}
+              ? `<ul class="list-group list-group-flush">${filteredLikely.map((a) => `<li class="list-group-item px-0">${approachLinkHtml(a)}</li>`).join("")}</ul>`
+              : "<div class=\"small text-secondary\">No approach chart metadata returned.</div>"}
+              </div>
+            </div>
           </div>
-        </details>
-        <details class="subsection">
-          <summary>Other Available Approaches</summary>
-          <div class="approaches alt-approaches">
+
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="alternate-heading-${accordionId}">
+              <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#alternate-body-${accordionId}" aria-expanded="false" aria-controls="alternate-body-${accordionId}">
+                Other Available Approaches
+              </button>
+            </h2>
+            <div id="alternate-body-${accordionId}" class="accordion-collapse collapse" aria-labelledby="alternate-heading-${accordionId}">
+              <div class="accordion-body">
             ${filteredAlternate.length
-              ? `<ul>${filteredAlternate.map((a) => `<li>${approachLinkHtml(a)}</li>`).join("")}</ul>`
-              : "<div class=\"small\">No additional approaches found.</div>"}
+              ? `<ul class="list-group list-group-flush">${filteredAlternate.map((a) => `<li class="list-group-item px-0">${approachLinkHtml(a)}</li>`).join("")}</ul>`
+              : "<div class=\"small text-secondary\">No additional approaches found.</div>"}
+              </div>
+            </div>
           </div>
-        </details>
-        <details class="subsection">
-          <summary>Airfield Operational Notes</summary>
-          <div class="airfield-mini-info">
-            <div class="small">Towered: ${towered ? "Yes" : "No"}</div>
-            <div class="small">Lighting: ${hasLighting ? "Available" : "Unknown/Unlit"} | Elev: ${stop.elevationFt ?? "N/A"} ft</div>
-            <div class="small">Service: ${stop.scheduledService ? "Scheduled" : "Non-scheduled"}</div>
-            <div class="small mt-1"><strong>Available Runways</strong></div>
-            <ul class="small runway-list-mini">${runwaysList || "<li>No runway records</li>"}</ul>
-            ${stop.approachStats.hasRadarMinimums ? "<div class=\"small\">Radar minimums published: GCA training capability available.</div>" : ""}
-            ${stop.suitability.flags.length ? `<div class="small warning">Suitability flags: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
+
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="ops-heading-${accordionId}">
+              <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#ops-body-${accordionId}" aria-expanded="false" aria-controls="ops-body-${accordionId}">
+                Airfield Operational Notes
+              </button>
+            </h2>
+            <div id="ops-body-${accordionId}" class="accordion-collapse collapse" aria-labelledby="ops-heading-${accordionId}">
+              <div class="accordion-body">
+                <div class="small text-secondary">Towered: ${towered ? "Yes" : "No"}</div>
+                <div class="small text-secondary">Lighting: ${hasLighting ? "Available" : "Unknown/Unlit"} | Elev: ${stop.elevationFt ?? "N/A"} ft</div>
+                <div class="small text-secondary">Service: ${stop.scheduledService ? "Scheduled" : "Non-scheduled"}</div>
+                <div class="small mt-2 fw-semibold">Available Runways</div>
+                <ul class="small mb-2">${runwaysList || "<li>No runway records</li>"}</ul>
+                ${stop.approachStats.hasRadarMinimums ? "<div class=\"small text-secondary\">Radar minimums published: GCA training capability available.</div>" : ""}
+                ${stop.suitability.flags.length ? `<div class="small text-warning-emphasis mt-2">Suitability flags: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
+              </div>
+            </div>
           </div>
-        </details>
-        <details class="subsection">
-          <summary>Scoring and Data Source</summary>
-          <div class="small detail-footer">
+
+          <div class="accordion-item">
+            <h2 class="accordion-header" id="score-heading-${accordionId}">
+              <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#score-body-${accordionId}" aria-expanded="false" aria-controls="score-body-${accordionId}">
+                Scoring and Data Source
+              </button>
+            </h2>
+            <div id="score-body-${accordionId}" class="accordion-collapse collapse" aria-labelledby="score-heading-${accordionId}">
+              <div class="accordion-body small text-secondary">
             <div>Score: diversity ${Math.round(stop.scoreBreakdown.diversity)}, quantity ${Math.round(stop.scoreBreakdown.quantity)}, wind ${Math.round(stop.scoreBreakdown.wind)}, runway ${Math.round(stop.scoreBreakdown.runway)}, suitability penalty ${Math.round(stop.scoreBreakdown.suitabilityPenalty)}.</div>
             <div>Approach data source: ${approachSources.length ? approachSources.join(", ") : "Unavailable"}</div>
             ${!INCLUDE_TACAN_FOR_T6_SCORING ? "<div>TACAN approaches are available in backend data but excluded from T-6 scoring/output.</div>" : ""}
+              </div>
+            </div>
           </div>
-        </details>
+        </div>
       </div>
     </article>
   `;

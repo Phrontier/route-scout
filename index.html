@@ -4,92 +4,116 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>IFR Training Route Planner</title>
+    <meta name="theme-color" content="#0f4c81" />
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <link rel="stylesheet" href="bootstrap-5.3.8-dist/css/bootstrap.min.css?v=0.0.16" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=0.0.17" />
+    <link rel="shortcut icon" href="favicon.svg?v=0.0.17" />
+    <link rel="stylesheet" href="bootstrap-5.3.8-dist/css/bootstrap.min.css?v=0.0.17" />
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="style.css?v=0.0.16" />
+    <link rel="stylesheet" href="style.css?v=0.0.17" />
   </head>
   <body>
-    <main class="app-shell">
-      <header>
-        <h1>Instrument Training Route Planner</h1>
-        <p>Generate and compare multiple IFR training routes by runway wind fit and approach training value.</p>
-        <p class="small" id="version-ticker">Version: loading...</p>
-      </header>
-
-      <section class="panel">
-        <form id="planner-form" class="planner-form">
-          <label class="field-origin">
-            Origin ICAO
-            <input id="origin" name="origin" type="text" maxlength="4" placeholder="KSQL" required />
-          </label>
-
-          <label class="field-date">
-            Flight Date
-            <input id="flight-date" name="flightDate" type="date" required />
-          </label>
-
-          <label class="field-type">
-            Flight Type
-            <select id="flight-type" name="flightType" required>
-              <option value="single">Single</option>
-              <option value="double">Double</option>
-              <option value="triple">Triple</option>
-            </select>
-          </label>
-
-          <label class="field-time">
-            Takeoff Time (Local)
-            <input id="time-local" name="timeLocal" type="time" value="12:00" required />
-          </label>
-
-          <label class="slider-label field-distance">
-            Max Leg Distance: <span id="distance-value">100 NM</span>
-            <input id="max-distance" name="maxDistance" type="range" min="50" max="150" value="100" step="5" />
-          </label>
-
-          <fieldset class="approach-needs field-approaches">
-            <legend class="small mb-2">Required Approach Types (Weighted)</legend>
-            <div class="approach-grid">
-              <label><input type="checkbox" id="all-approaches" name="approachTypeAll" checked /> All options</label>
-              <label><input type="checkbox" name="approachType" value="ILS" /> ILS</label>
-              <label><input type="checkbox" name="approachType" value="LOC" /> LOC</label>
-              <label><input type="checkbox" name="approachType" value="RNAV" /> RNAV/GPS</label>
-              <label><input type="checkbox" name="approachType" value="VOR" /> VOR</label>
-              <label><input type="checkbox" name="approachType" value="NDB" /> NDB</label>
-              <label><input type="checkbox" name="approachType" value="GCA" /> GCA</label>
-              <label><input type="checkbox" name="approachType" value="CIRCLING" /> Circling</label>
+    <main class="container-xxl py-4">
+      <section class="card border-0 shadow-sm mb-3">
+        <div class="card-body p-4">
+          <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-2">
+            <div>
+              <h1 class="h2 mb-2">Instrument Training Route Planner</h1>
+              <p class="text-secondary mb-0">Generate and compare multiple IFR training routes by runway wind fit and approach training value.</p>
             </div>
-          </fieldset>
-          <p id="distance-help" class="small field-help"></p>
-
-          <div class="form-actions">
-            <button id="generate-btn" type="submit">Generate Routes</button>
+            <p class="small text-secondary mb-0" id="version-ticker">Version: loading...</p>
           </div>
-        </form>
-
-        <p class="note">
-          Airport filter: at least one runway >= 4000 ft. Contract fuel is not hard-filtered; verify manually.
-        </p>
+        </div>
       </section>
 
-      <section id="status" class="status">Enter route details and click "Generate Routes".</section>
-      <section id="results" class="results"></section>
+      <section class="card border-0 shadow-sm mb-3">
+        <div class="card-body p-4">
+          <form id="planner-form" class="row g-3">
+            <div class="col-12 col-md-6 col-xl-3">
+              <label for="origin" class="form-label fw-semibold">Origin ICAO</label>
+              <input id="origin" name="origin" type="text" maxlength="4" placeholder="KSQL" required class="form-control text-uppercase" />
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+              <label for="flight-date" class="form-label fw-semibold">Flight Date</label>
+              <input id="flight-date" name="flightDate" type="date" required class="form-control" />
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+              <label for="flight-type" class="form-label fw-semibold">Flight Type</label>
+              <select id="flight-type" name="flightType" required class="form-select">
+                <option value="single">Single</option>
+                <option value="double">Double</option>
+                <option value="triple">Triple</option>
+              </select>
+            </div>
+
+            <div class="col-12 col-md-6 col-xl-3">
+              <label for="time-local" class="form-label fw-semibold">Takeoff Time (Local)</label>
+              <input id="time-local" name="timeLocal" type="time" value="12:00" required class="form-control" />
+            </div>
+
+            <div class="col-12 col-xl-4">
+              <label for="max-distance" class="form-label fw-semibold d-flex justify-content-between align-items-center">
+                <span>Max Leg Distance</span>
+                <span id="distance-value" class="text-secondary">100 NM</span>
+              </label>
+              <input id="max-distance" name="maxDistance" type="range" min="50" max="150" value="100" step="5" class="form-range" />
+              <p id="distance-help" class="small text-secondary mb-0"></p>
+            </div>
+
+            <fieldset class="col-12 col-xl-8 approach-needs">
+              <legend class="form-label fw-semibold">Required Approach Types (Weighted)</legend>
+              <div class="card rs-approach-card">
+                <div class="card-body py-2">
+                  <div class="row g-2">
+                    <div class="col-6 col-md-4 col-lg-3">
+                      <label class="form-check-label d-flex align-items-center gap-2">
+                        <input type="checkbox" id="all-approaches" name="approachTypeAll" checked class="form-check-input mt-0" /> All options
+                      </label>
+                    </div>
+                    <div class="col-6 col-md-4 col-lg-3"><label class="form-check-label d-flex align-items-center gap-2"><input type="checkbox" name="approachType" value="ILS" class="form-check-input mt-0" /> ILS</label></div>
+                    <div class="col-6 col-md-4 col-lg-3"><label class="form-check-label d-flex align-items-center gap-2"><input type="checkbox" name="approachType" value="LOC" class="form-check-input mt-0" /> LOC</label></div>
+                    <div class="col-6 col-md-4 col-lg-3"><label class="form-check-label d-flex align-items-center gap-2"><input type="checkbox" name="approachType" value="RNAV" class="form-check-input mt-0" /> RNAV/GPS</label></div>
+                    <div class="col-6 col-md-4 col-lg-3"><label class="form-check-label d-flex align-items-center gap-2"><input type="checkbox" name="approachType" value="VOR" class="form-check-input mt-0" /> VOR</label></div>
+                    <div class="col-6 col-md-4 col-lg-3"><label class="form-check-label d-flex align-items-center gap-2"><input type="checkbox" name="approachType" value="NDB" class="form-check-input mt-0" /> NDB</label></div>
+                    <div class="col-6 col-md-4 col-lg-3"><label class="form-check-label d-flex align-items-center gap-2"><input type="checkbox" name="approachType" value="GCA" class="form-check-input mt-0" /> GCA</label></div>
+                    <div class="col-6 col-md-4 col-lg-3"><label class="form-check-label d-flex align-items-center gap-2"><input type="checkbox" name="approachType" value="CIRCLING" class="form-check-input mt-0" /> Circling</label></div>
+                  </div>
+                </div>
+              </div>
+            </fieldset>
+
+            <div class="col-12 d-flex justify-content-center pt-1">
+              <button id="generate-btn" type="submit" class="btn btn-primary rs-generate-btn">Generate Routes</button>
+            </div>
+          </form>
+
+          <p class="small text-secondary mb-0 mt-3">
+            Airport filter: at least one runway &gt;= 4000 ft. Contract fuel is not hard-filtered; verify manually.
+          </p>
+        </div>
+      </section>
+
+      <section id="status" class="alert alert-info d-flex align-items-center gap-2 mb-3" role="status">
+        Enter route details and click "Generate Routes".
+      </section>
+      <section id="results" class="vstack gap-3"></section>
     </main>
 
-    <script src="bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js?v=0.0.16"></script>
+    <script src="bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js?v=0.0.17"></script>
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin=""
     ></script>
-    <script src="app.js?v=0.0.16" type="module"></script>
+    <script src="app.js?v=0.0.17" type="module"></script>
   </body>
 </html>

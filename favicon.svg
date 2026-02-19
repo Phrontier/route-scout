@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="Route Scout favicon">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0f4c81" />
+      <stop offset="100%" stop-color="#1f6cad" />
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="12" fill="url(#bg)" />
+  <path d="M14 50h36" stroke="#d9ecff" stroke-width="3" stroke-linecap="round" />
+  <path d="M31 14v36" stroke="#ffffff" stroke-width="8" stroke-linecap="round" />
+  <path d="M31 20v6M31 30v6M31 40v6" stroke="#0f4c81" stroke-width="2.8" stroke-linecap="round" />
+  <path d="M14 24c8 0 13-5 17-11 4 6 9 11 17 11" fill="none" stroke="#ffd570" stroke-width="3" stroke-linecap="round" />
+</svg>

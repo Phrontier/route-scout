@@ -73,3 +73,10 @@ python3 -m http.server 8080
 ```
 
 Open [http://localhost:8080](http://localhost:8080)
+
+## UI Conventions (Bootstrap-First)
+
+- Use Bootstrap grid/components/utilities as the default for layout and UI structure.
+- Prefer Bootstrap utility classes before creating new custom CSS selectors.
+- Reserve custom CSS for brand tokens, score highlights, map sizing, and other gaps not covered well by Bootstrap.
+- Any unavoidable custom classes should use an `rs-` prefix and stay component-scoped.
