@@ -51,6 +51,14 @@ TACAN procedures remain in backend parsing but are excluded from T-6 scoring/out
 This app uses a same-origin proxy at `/api/proxy` (implemented in `functions/proxy.js`) to fetch FAA/Aviation data without browser CORS proxy services.  
 If deployed on Cloudflare Pages, ensure `functions/proxy.js` is included in your project.
 
+## Versioning
+
+The app uses semantic versioning with patch bumps for small bug fixes: `v0.0.x`.
+
+- Update `/Users/conwaybolt/Documents/Codex/Instruments/version.json` `version` value for each deploy.
+- Match the same patch value in asset query params inside `/Users/conwaybolt/Documents/Codex/Instruments/index.html` (for `style.css`, `app.js`, Bootstrap files) to force cache refresh on Cloudflare.
+- The header ticker renders the live deployed value from `version.json`.
+
 ## Run
 
 ```bash

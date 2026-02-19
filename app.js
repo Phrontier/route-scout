@@ -12,6 +12,8 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
+const APP_VERSION = "0.0.3";
+const VERSION_FILE_PATH = "version.json";
 
 const FLIGHT_RULES = {
   single: {
@@ -86,6 +88,7 @@ const cache = {
 const statusEl = document.getElementById("status");
 const resultsEl = document.getElementById("results");
 const formEl = document.getElementById("planner-form");
+const versionTickerEl = document.getElementById("version-ticker");
 const dateInput = document.getElementById("flight-date");
 const typeInput = document.getElementById("flight-type");
 const distanceInput = document.getElementById("max-distance");
@@ -131,6 +134,7 @@ const LONG_WAIT_PHRASES = [
 ];
 
 dateInput.value = new Date().toISOString().slice(0, 10);
+initVersionTicker();
 updateDistanceControl(typeInput.value);
 typeInput.addEventListener("change", () => updateDistanceControl(typeInput.value));
 distanceInput.addEventListener("input", () => {
@@ -291,6 +295,29 @@ function stopLoadingTicker() {
     clearInterval(loadingTickerId);
     loadingTickerId = null;
   }
+}
+
+async function initVersionTicker() {
+  if (!versionTickerEl) return;
+
+  let version = APP_VERSION;
+  let channel = "prod";
+
+  try {
+    const bust = Date.now();
+    const response = await fetch(`${VERSION_FILE_PATH}?t=${bust}`, { cache: "no-store" });
+    if (response.ok) {
+      const json = await response.json();
+      const fileVersion = String(json?.version || "").trim();
+      if (fileVersion) version = fileVersion;
+      const fileChannel = String(json?.channel || "").trim();
+      if (fileChannel) channel = fileChannel;
+    }
+  } catch (_error) {
+    // Keep built-in version fallback.
+  }
+
+  versionTickerEl.textContent = `Version v${version} (${channel})`;
 }
 
 async function loadCoreData() {
