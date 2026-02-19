@@ -14,10 +14,11 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.11";
+const APP_VERSION = "0.0.12";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
+const PROXY_PATH = "/proxy";
 
 const FLIGHT_RULES = {
   single: {
@@ -1613,7 +1614,7 @@ function buildFetchCandidates(url) {
   const isLocal = LOCAL_HOSTS.has(window.location.hostname);
   const encoded = encodeURIComponent(url);
 
-  // Local static hosting (python http.server) has no /api/proxy route.
+  // Local static hosting (python http.server) has no /proxy route.
   // Use public proxy candidates for external hosts while developing locally.
   if (isLocal) {
     out.push(`https://corsproxy.io/?${encoded}`);
@@ -1626,7 +1627,7 @@ function buildFetchCandidates(url) {
   }
 
   // In deployed environments, go through same-origin proxy first to avoid browser CORS failures.
-  out.push(`/api/proxy?url=${encoded}`);
+  out.push(`${PROXY_PATH}?url=${encoded}`);
   out.push(url);
   return out;
 }
