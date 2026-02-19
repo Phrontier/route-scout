@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.12";
+const APP_VERSION = "0.0.13";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
@@ -1169,7 +1169,6 @@ function airfieldDetailCardHtml(stop, title) {
   const alternateApproaches = stop.approachStats.alternateApproaches;
   const runwayBand = stop.likelyRunway ? stop.likelyRunway.highlightBand : "red";
   const approachSources = [...new Set((stop.approaches || []).map((a) => a.source).filter(Boolean))];
-  const miniRunway = renderRunwayMiniView(stop.runways || [], stop.likelyRunway?.runwayIdent, stop.wind);
   const filteredLikely = likelyApproaches.filter((a) => INCLUDE_TACAN_FOR_T6_SCORING || !classifyApproachTypes(a.name).includes("TACAN"));
   const filteredAlternate = alternateApproaches.filter((a) => INCLUDE_TACAN_FOR_T6_SCORING || !classifyApproachTypes(a.name).includes("TACAN"));
   const runwaysList = (stop.runways || [])
@@ -1193,7 +1192,7 @@ function airfieldDetailCardHtml(stop, title) {
           <span>Likely RWY ${stop.likelyRunway ? stop.likelyRunway.runwayIdent : "N/A"}</span>
         </div>
         <div class="combined-mini row g-2">
-          <div class="col-lg-5">
+          <div class="col-12">
             <div class="airfield-mini-info">
               <strong>Airfield Mini Info</strong>
               <div class="small">Towered: ${towered ? "Yes" : "No"}</div>
@@ -1202,9 +1201,6 @@ function airfieldDetailCardHtml(stop, title) {
               <div class="small mt-1"><strong>Available Runways</strong></div>
               <ul class="small runway-list-mini">${runwaysList || "<li>No runway records</li>"}</ul>
             </div>
-          </div>
-          <div class="col-lg-7">
-            <div class="mini-view-wrap">${miniRunway}</div>
           </div>
         </div>
         <div class="approach-columns row g-2">
