@@ -60,7 +60,7 @@ export async function onRequest(context) {
     headers.set("access-control-allow-methods", "GET, OPTIONS");
     headers.set("access-control-allow-headers", "Content-Type");
 
-    const body = await upstream.arrayBuffer();
+    const body = await upstream.text();
 
     return new Response(body, {
       status: upstream.status,
