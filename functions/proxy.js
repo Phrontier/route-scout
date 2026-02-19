@@ -1,0 +1,64 @@
+const ALLOWED_HOSTS = new Set([
+  "raw.githubusercontent.com",
+  "cdn.jsdelivr.net",
+  "www.faa.gov",
+  "faa.gov",
+  "aeronav.faa.gov",
+  "api.aviationapi.com",
+  "www.aviationapi.com",
+  "api.open-meteo.com",
+  "archive-api.open-meteo.com"
+]);
+
+export async function onRequest(context) {
+  const req = context.request;
+  const reqUrl = new URL(req.url);
+  const target = reqUrl.searchParams.get("url");
+
+  if (!target) {
+    return new Response("Missing url parameter", { status: 400 });
+  }
+
+  let parsed;
+  try {
+    parsed = new URL(target);
+  } catch {
+    return new Response("Invalid url parameter", { status: 400 });
+  }
+
+  if (!["http:", "https:"].includes(parsed.protocol)) {
+    return new Response("Unsupported protocol", { status: 400 });
+  }
+
+  if (!ALLOWED_HOSTS.has(parsed.hostname)) {
+    return new Response("Host not allowed", { status: 403 });
+  }
+
+  try {
+    const upstream = await fetch(parsed.toString(), {
+      method: "GET",
+      headers: {
+        "User-Agent": "IFR-Training-Route-Planner/1.0"
+      }
+    });
+
+    const headers = new Headers();
+    const contentType = upstream.headers.get("content-type") || "text/plain; charset=utf-8";
+    const cacheControl = upstream.headers.get("cache-control") || "public, max-age=300";
+
+    headers.set("content-type", contentType);
+    headers.set("cache-control", cacheControl);
+
+    return new Response(upstream.body, {
+      status: upstream.status,
+      headers
+    });
+  } catch (error) {
+    return new Response(`Proxy fetch failed: ${error?.message || "unknown error"}`, {
+      status: 502,
+      headers: {
+        "content-type": "text/plain; charset=utf-8"
+      }
+    });
+  }
+}

@@ -1506,12 +1506,8 @@ function buildFetchCandidates(url) {
   const out = [url];
   if (!String(url).startsWith("http")) return out;
 
-  out.push(`https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`);
-  out.push(`https://corsproxy.io/?${encodeURIComponent(url)}`);
-  out.push(`https://corsproxy.io/?${url}`);
-
-  const forJina = url.replace(/^https?:\/\//i, "");
-  out.push(`https://r.jina.ai/http://${forJina}`);
+  // Cloudflare Pages Function proxy (same-origin in deployed site).
+  out.push(`/api/proxy?url=${encodeURIComponent(url)}`);
   return out;
 }
 

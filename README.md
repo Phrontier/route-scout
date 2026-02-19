@@ -46,6 +46,11 @@ TACAN procedures remain in backend parsing but are excluded from T-6 scoring/out
 - approaches: FAA d-TPP Metafile XML (official source, with AviationAPI fallback)
 - airport diagrams/radar minimums: AviationAPI charts page parsing (General + Approach sections)
 
+## Cloudflare Pages Deployment
+
+This app uses a same-origin proxy at `/api/proxy` (implemented in `functions/proxy.js`) to fetch FAA/Aviation data without browser CORS proxy services.  
+If deployed on Cloudflare Pages, ensure `functions/proxy.js` is included in your project.
+
 ## Run
 
 ```bash
