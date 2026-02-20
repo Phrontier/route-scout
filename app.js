@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.17";
+const APP_VERSION = "0.0.18";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
@@ -1197,9 +1197,9 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
     .join("");
 
   return `
-    <div class="mt-3 pt-3 border-top">
+    <div class="mt-3 pt-3 border-top rs-detail-shell">
       <h3 class="h5 mb-3">Selected Route Detail</h3>
-      <div class="card border">
+      <div class="card border rs-detail-panel">
         <div class="card-body">
           <div class="row g-3">
             <div class="col-lg-4">
@@ -1214,34 +1214,33 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
               </div>
             </div>
           </div>
-          <div class="mt-3">
+          <div class="mt-3 pt-3 border-top">
             <div class="fw-semibold mb-2">Route Quick Map</div>
             <div id="${mapId}" class="rs-route-map border rounded-3"></div>
           </div>
         </div>
       </div>
-      <div class="accordion mt-3" id="route-detail-${mapId}">
-        <div class="accordion-item">
-          <h2 class="accordion-header" id="heading-home-${mapId}">
-            <button class="accordion-button" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-home-${mapId}" aria-expanded="true" aria-controls="collapse-home-${mapId}">
-              Home Field Detail
-            </button>
-          </h2>
-          <div id="collapse-home-${mapId}" class="accordion-collapse collapse show" aria-labelledby="heading-home-${mapId}">
-            <div class="accordion-body">${airfieldDetailCardHtml(originProfile, "Home Field", `${mapId}-home`)}</div>
-          </div>
-        </div>
-        ${route.stops.map((stop, idx) => `
-          <div class="accordion-item">
-            <h2 class="accordion-header" id="heading-dest-${idx}-${mapId}">
-              <button class="accordion-button ${idx === 0 ? "" : "collapsed"}" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-dest-${idx}-${mapId}" aria-expanded="${idx === 0 ? "true" : "false"}" aria-controls="collapse-dest-${idx}-${mapId}">
-                Destination Detail ${idx + 1}: ${stop.ident}
-              </button>
-            </h2>
-            <div id="collapse-dest-${idx}-${mapId}" class="accordion-collapse collapse ${idx === 0 ? "show" : ""}" aria-labelledby="heading-dest-${idx}-${mapId}">
-              <div class="accordion-body">${airfieldDetailCardHtml(stop, `Destination ${idx + 1}`, `${mapId}-dest-${idx}`)}</div>
+
+      <div class="vstack gap-3 mt-3">
+        <section class="card border rs-airfield-panel">
+          <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+              <h4 class="h6 mb-0">Home Field Detail: ${originProfile.ident}</h4>
+              <span class="small text-secondary">${originProfile.name ? escapeHtml(originProfile.name) : ""}</span>
             </div>
+            ${airfieldDetailCardHtml(originProfile, "home", `${mapId}-home`)}
           </div>
+        </section>
+        ${route.stops.map((stop, idx) => `
+          <section class="card border rs-airfield-panel">
+            <div class="card-body">
+              <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+                <h4 class="h6 mb-0">Destination ${idx + 1}: ${stop.ident}</h4>
+                <span class="small text-secondary">${stop.name ? escapeHtml(stop.name) : ""}</span>
+              </div>
+              ${airfieldDetailCardHtml(stop, `destination-${idx + 1}`, `${mapId}-dest-${idx}`)}
+            </div>
+          </section>
         `).join("")}
       </div>
     </div>
@@ -1286,85 +1285,69 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
     .join("");
   const towered = inferTowered(stop);
   const hasLighting = (stop.runways || []).some((r) => r.lighted);
-  const accordionId = `airfield-sections-${String(stop.ident || "apt").toLowerCase()}-${keySuffix}`;
+  const tabId = `airfield-tabs-${String(stop.ident || "apt").toLowerCase()}-${String(keySuffix || title).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
+  const overviewTab = `${tabId}-overview`;
+  const primaryTab = `${tabId}-primary`;
+  const alternateTab = `${tabId}-alternate`;
+  const opsTab = `${tabId}-ops`;
+  const scoringTab = `${tabId}-scoring`;
+  const likelyRunwayText = stop.likelyRunway ? `${stop.likelyRunway.runwayIdent}` : "N/A";
 
   return `
-    <article class="card border-0 shadow-sm">
-      <div class="card-body p-3">
-        <h4 class="h6 mb-2">${title}: ${stop.ident}</h4>
-        <div class="d-flex flex-wrap gap-2 mb-3 small text-secondary">
-          <span class="badge text-bg-light border"><span class="rs-dot rs-dot-${runwayBand}"></span> Training Score ${stop.trainingScore}</span>
-          <span class="badge text-bg-light border">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
-          <span class="badge text-bg-light border">Likely RWY ${stop.likelyRunway ? stop.likelyRunway.runwayIdent : "N/A"}</span>
+    <div>
+      <ul class="nav nav-tabs rs-airfield-tabs" id="${tabId}" role="tablist">
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="${overviewTab}-tab" data-bs-toggle="tab" data-bs-target="#${overviewTab}" type="button" role="tab" aria-controls="${overviewTab}" aria-selected="false">Overview</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link active" id="${primaryTab}-tab" data-bs-toggle="tab" data-bs-target="#${primaryTab}" type="button" role="tab" aria-controls="${primaryTab}" aria-selected="true">Primary Approaches</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="${alternateTab}-tab" data-bs-toggle="tab" data-bs-target="#${alternateTab}" type="button" role="tab" aria-controls="${alternateTab}" aria-selected="false">Other Approaches</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="${opsTab}-tab" data-bs-toggle="tab" data-bs-target="#${opsTab}" type="button" role="tab" aria-controls="${opsTab}" aria-selected="false">Ops Notes</button>
+        </li>
+        <li class="nav-item" role="presentation">
+          <button class="nav-link" id="${scoringTab}-tab" data-bs-toggle="tab" data-bs-target="#${scoringTab}" type="button" role="tab" aria-controls="${scoringTab}" aria-selected="false">Scoring & Source</button>
+        </li>
+      </ul>
+      <div class="tab-content border border-top-0 rounded-bottom p-3 rs-tab-content">
+        <div class="tab-pane fade" id="${overviewTab}" role="tabpanel" aria-labelledby="${overviewTab}-tab" tabindex="0">
+          <div class="d-flex flex-wrap gap-2 mb-2 small text-secondary">
+            <span class="badge text-bg-light border"><span class="rs-dot rs-dot-${runwayBand}"></span> Training Score ${stop.trainingScore}</span>
+            <span class="badge text-bg-light border">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
+            <span class="badge text-bg-light border">Likely RWY ${likelyRunwayText}</span>
+          </div>
+          <div class="small text-secondary">Runways: ${(stop.runways || []).length} | Elevation: ${stop.elevationFt ?? "N/A"} ft | Towered: ${towered ? "Yes" : "No"}</div>
+          ${stop.suitability.flags.length ? `<div class="small text-warning-emphasis mt-2">Caution: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
         </div>
-
-        <div class="accordion" id="${accordionId}">
-          <div class="accordion-item">
-            <h2 class="accordion-header" id="primary-heading-${accordionId}">
-              <button class="accordion-button py-2" type="button" data-bs-toggle="collapse" data-bs-target="#primary-body-${accordionId}" aria-expanded="true" aria-controls="primary-body-${accordionId}">
-                Primary Runway Approaches
-              </button>
-            </h2>
-            <div id="primary-body-${accordionId}" class="accordion-collapse collapse show" aria-labelledby="primary-heading-${accordionId}">
-              <div class="accordion-body">
-            ${filteredLikely.length
-              ? `<ul class="list-group list-group-flush">${filteredLikely.map((a) => `<li class="list-group-item px-0">${approachLinkHtml(a)}</li>`).join("")}</ul>`
-              : "<div class=\"small text-secondary\">No approach chart metadata returned.</div>"}
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h2 class="accordion-header" id="alternate-heading-${accordionId}">
-              <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#alternate-body-${accordionId}" aria-expanded="false" aria-controls="alternate-body-${accordionId}">
-                Other Available Approaches
-              </button>
-            </h2>
-            <div id="alternate-body-${accordionId}" class="accordion-collapse collapse" aria-labelledby="alternate-heading-${accordionId}">
-              <div class="accordion-body">
-            ${filteredAlternate.length
-              ? `<ul class="list-group list-group-flush">${filteredAlternate.map((a) => `<li class="list-group-item px-0">${approachLinkHtml(a)}</li>`).join("")}</ul>`
-              : "<div class=\"small text-secondary\">No additional approaches found.</div>"}
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h2 class="accordion-header" id="ops-heading-${accordionId}">
-              <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#ops-body-${accordionId}" aria-expanded="false" aria-controls="ops-body-${accordionId}">
-                Airfield Operational Notes
-              </button>
-            </h2>
-            <div id="ops-body-${accordionId}" class="accordion-collapse collapse" aria-labelledby="ops-heading-${accordionId}">
-              <div class="accordion-body">
-                <div class="small text-secondary">Towered: ${towered ? "Yes" : "No"}</div>
-                <div class="small text-secondary">Lighting: ${hasLighting ? "Available" : "Unknown/Unlit"} | Elev: ${stop.elevationFt ?? "N/A"} ft</div>
-                <div class="small text-secondary">Service: ${stop.scheduledService ? "Scheduled" : "Non-scheduled"}</div>
-                <div class="small mt-2 fw-semibold">Available Runways</div>
-                <ul class="small mb-2">${runwaysList || "<li>No runway records</li>"}</ul>
-                ${stop.approachStats.hasRadarMinimums ? "<div class=\"small text-secondary\">Radar minimums published: GCA training capability available.</div>" : ""}
-                ${stop.suitability.flags.length ? `<div class="small text-warning-emphasis mt-2">Suitability flags: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
-              </div>
-            </div>
-          </div>
-
-          <div class="accordion-item">
-            <h2 class="accordion-header" id="score-heading-${accordionId}">
-              <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#score-body-${accordionId}" aria-expanded="false" aria-controls="score-body-${accordionId}">
-                Scoring and Data Source
-              </button>
-            </h2>
-            <div id="score-body-${accordionId}" class="accordion-collapse collapse" aria-labelledby="score-heading-${accordionId}">
-              <div class="accordion-body small text-secondary">
-            <div>Score: diversity ${Math.round(stop.scoreBreakdown.diversity)}, quantity ${Math.round(stop.scoreBreakdown.quantity)}, wind ${Math.round(stop.scoreBreakdown.wind)}, runway ${Math.round(stop.scoreBreakdown.runway)}, suitability penalty ${Math.round(stop.scoreBreakdown.suitabilityPenalty)}.</div>
-            <div>Approach data source: ${approachSources.length ? approachSources.join(", ") : "Unavailable"}</div>
-            ${!INCLUDE_TACAN_FOR_T6_SCORING ? "<div>TACAN approaches are available in backend data but excluded from T-6 scoring/output.</div>" : ""}
-              </div>
-            </div>
-          </div>
+        <div class="tab-pane fade show active" id="${primaryTab}" role="tabpanel" aria-labelledby="${primaryTab}-tab" tabindex="0">
+          ${filteredLikely.length
+            ? `<ul class="list-group list-group-flush">${filteredLikely.map((a) => `<li class="list-group-item px-0">${approachLinkHtml(a)}</li>`).join("")}</ul>`
+            : "<div class=\"small text-secondary\">No approach chart metadata returned.</div>"}
+        </div>
+        <div class="tab-pane fade" id="${alternateTab}" role="tabpanel" aria-labelledby="${alternateTab}-tab" tabindex="0">
+          ${filteredAlternate.length
+            ? `<ul class="list-group list-group-flush">${filteredAlternate.map((a) => `<li class="list-group-item px-0">${approachLinkHtml(a)}</li>`).join("")}</ul>`
+            : "<div class=\"small text-secondary\">No additional approaches found.</div>"}
+        </div>
+        <div class="tab-pane fade" id="${opsTab}" role="tabpanel" aria-labelledby="${opsTab}-tab" tabindex="0">
+          <div class="small text-secondary">Towered: ${towered ? "Yes" : "No"}</div>
+          <div class="small text-secondary">Lighting: ${hasLighting ? "Available" : "Unknown/Unlit"} | Elev: ${stop.elevationFt ?? "N/A"} ft</div>
+          <div class="small text-secondary">Service: ${stop.scheduledService ? "Scheduled" : "Non-scheduled"}</div>
+          <div class="small mt-2 fw-semibold">Available Runways</div>
+          <ul class="small mb-2">${runwaysList || "<li>No runway records</li>"}</ul>
+          ${stop.approachStats.hasRadarMinimums ? "<div class=\"small text-secondary\">Radar minimums published: GCA training capability available.</div>" : ""}
+          ${stop.suitability.flags.length ? `<div class="small text-warning-emphasis mt-2">Suitability flags: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
+        </div>
+        <div class="tab-pane fade" id="${scoringTab}" role="tabpanel" aria-labelledby="${scoringTab}-tab" tabindex="0">
+          <div class="small text-secondary">Score: diversity ${Math.round(stop.scoreBreakdown.diversity)}, quantity ${Math.round(stop.scoreBreakdown.quantity)}, wind ${Math.round(stop.scoreBreakdown.wind)}, runway ${Math.round(stop.scoreBreakdown.runway)}, suitability penalty ${Math.round(stop.scoreBreakdown.suitabilityPenalty)}.</div>
+          <div class="small text-secondary mt-1">Approach data source: ${approachSources.length ? approachSources.join(", ") : "Unavailable"}</div>
+          ${!INCLUDE_TACAN_FOR_T6_SCORING ? "<div class=\"small text-secondary mt-1\">TACAN approaches are available in backend data but excluded from T-6 scoring/output.</div>" : ""}
         </div>
       </div>
-    </article>
+    </div>
   `;
 }
 
