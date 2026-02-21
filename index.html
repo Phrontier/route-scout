@@ -8,16 +8,16 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=0.0.18" />
-    <link rel="shortcut icon" href="favicon.svg?v=0.0.18" />
-    <link rel="stylesheet" href="bootstrap-5.3.8-dist/css/bootstrap.min.css?v=0.0.18" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=0.0.19" />
+    <link rel="shortcut icon" href="favicon.svg?v=0.0.19" />
+    <link rel="stylesheet" href="bootstrap-5.3.8-dist/css/bootstrap.min.css?v=0.0.19" />
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="style.css?v=0.0.18" />
+    <link rel="stylesheet" href="style.css?v=0.0.19" />
   </head>
   <body>
     <main class="container-xxl py-4">
@@ -26,8 +26,8 @@
           <div class="d-flex flex-wrap align-items-end justify-content-between gap-2 mb-2">
             <div>
               <h1 class="h2 mb-2">Instrument Training Route Planner</h1>
-              <p class="text-secondary mb-1">Compares forecast surface winds and published instrument approaches across multiple IFR route options, then ranks routes by training value so you can pick the best mission profile.</p>
-              <p class="small text-secondary mb-0">Scores prioritize approach variety and usable runway winds, not just direct headwind alignment.</p>
+              <p class="text-secondary mb-1">Evaluates forecast surface winds and published IFR procedures across candidate routes to identify the strongest training options before takeoff.</p>
+              <p class="small text-secondary mb-0">Ranking prioritizes approach diversity, runway usability, and mission training value.</p>
             </div>
             <p class="small text-secondary mb-0" id="version-ticker">Version: loading...</p>
           </div>
@@ -109,12 +109,12 @@
       <section id="results" class="vstack gap-3"></section>
     </main>
 
-    <script src="bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js?v=0.0.18"></script>
+    <script src="bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js?v=0.0.19"></script>
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin=""
     ></script>
-    <script src="app.js?v=0.0.18" type="module"></script>
+    <script src="app.js?v=0.0.19" type="module"></script>
   </body>
 </html>

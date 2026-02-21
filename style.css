@@ -1,10 +1,12 @@
 :root {
-  --rs-bg-a: #e8eef5;
-  --rs-bg-b: #f6f8fb;
-  --rs-card-shadow: 0 6px 18px rgba(15, 48, 78, 0.07);
+  --rs-bg-a: #dbe8f3;
+  --rs-bg-b: #f3f7fb;
+  --rs-card-shadow: 0 8px 24px rgba(15, 48, 78, 0.08);
+  --rs-card-shadow-soft: 0 4px 14px rgba(10, 34, 58, 0.06);
   --rs-border: #d6e2ee;
   --rs-brand: #0f4c81;
   --rs-brand-2: #165f9b;
+  --rs-brand-3: #2a79b8;
   --rs-green: #137333;
   --rs-green-bg: #dcf4e3;
   --rs-yellow: #8a6a00;
@@ -15,24 +17,42 @@
 
 body {
   min-height: 100vh;
-  background: radial-gradient(circle at 0% 0%, var(--rs-bg-a), var(--rs-bg-b) 56%);
+  overflow-x: clip;
+  background:
+    radial-gradient(60rem 28rem at -6% -10%, rgba(33, 94, 152, 0.18), transparent 58%),
+    radial-gradient(48rem 22rem at 110% -5%, rgba(14, 74, 126, 0.12), transparent 62%),
+    linear-gradient(180deg, var(--rs-bg-a), var(--rs-bg-b) 54%);
 }
 
 .card {
   box-shadow: var(--rs-card-shadow);
+  transition: box-shadow 160ms ease, transform 160ms ease;
 }
 
 .rs-hero-card {
   position: relative;
   overflow: hidden;
+  background: linear-gradient(125deg, #f9fcff 0%, #f3f8fd 42%, #edf4fb 100%);
 }
 
 .rs-hero-card::before {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
-  width: 7px;
-  background: linear-gradient(180deg, var(--rs-brand), var(--rs-brand-2));
+  width: 8px;
+  background: linear-gradient(180deg, var(--rs-brand), var(--rs-brand-2), var(--rs-brand-3));
+}
+
+.rs-hero-card::after {
+  content: "";
+  position: absolute;
+  right: -80px;
+  top: -80px;
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, rgba(29, 102, 164, 0.18), rgba(29, 102, 164, 0.03) 66%, transparent 68%);
+  pointer-events: none;
 }
 
 .form-control,
@@ -44,6 +64,29 @@ body {
 .badge,
 .accordion-item {
   border-color: var(--rs-border);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--rs-brand), var(--rs-brand-2));
+  border-color: #0d4c80;
+}
+
+.btn-primary:hover,
+.btn-primary:focus-visible {
+  background: linear-gradient(135deg, #0d456f, #15588f);
+  border-color: #0c446d;
+}
+
+.btn-outline-primary {
+  border-color: #8ab0d2;
+  color: #1a4f79;
+}
+
+.btn-outline-primary:hover,
+.btn-outline-primary:focus-visible {
+  background: #edf5fc;
+  border-color: #4e84b5;
+  color: #123f63;
 }
 
 #planner-form .form-label {
@@ -87,6 +130,7 @@ body {
 
 .rs-route-selected {
   outline: 2px solid #8db0d0;
+  box-shadow: 0 10px 24px rgba(33, 86, 132, 0.14);
 }
 
 .rs-score-badge {
@@ -138,7 +182,7 @@ body {
 
 .rs-detail-shell .card,
 .rs-airfield-panel {
-  box-shadow: 0 3px 10px rgba(12, 37, 62, 0.05);
+  box-shadow: var(--rs-card-shadow-soft);
 }
 
 .rs-detail-panel {
@@ -150,6 +194,7 @@ body {
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: thin;
+  gap: 0.2rem;
 }
 
 .rs-airfield-tabs .nav-link {
@@ -162,17 +207,33 @@ body {
 .rs-airfield-tabs .nav-link.active {
   color: var(--rs-brand);
   font-weight: 600;
+  border-color: #cfddeb #cfddeb #fff;
 }
 
 .rs-tab-content {
   background: #fff;
   border-color: #cfddeb !important;
+  overflow-x: hidden;
+}
+
+.rs-airfield-section-picker {
+  border-color: #bfd5e8;
+  box-shadow: inset 0 1px 2px rgba(23, 53, 80, 0.04);
+}
+
+.rs-airfield-section-picker:focus {
+  border-color: #6ea1ce;
+  box-shadow: 0 0 0 0.2rem rgba(29, 103, 164, 0.2);
 }
 
 .rs-route-map {
   height: 260px;
   width: 100%;
   background: #eef3f8;
+}
+
+#results .card:hover {
+  transform: translateY(-1px);
 }
 
 #results a {
@@ -184,6 +245,10 @@ body {
   color: #0b355b;
 }
 
+main {
+  overflow-x: clip;
+}
+
 @media (max-width: 575px) {
   .rs-score-badge {
     min-width: 2.9rem;
@@ -191,6 +256,14 @@ body {
 
   .rs-route-map {
     height: 220px;
+  }
+}
+
+@media (max-width: 767.98px) {
+  .rs-tab-content {
+    border-top: 1px solid #cfddeb !important;
+    border-top-left-radius: 0.5rem !important;
+    border-top-right-radius: 0.5rem !important;
   }
 }
 

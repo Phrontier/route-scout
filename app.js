@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.18";
+const APP_VERSION = "0.0.19";
 const VERSION_FILE_PATH = "version.json";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
@@ -168,6 +168,23 @@ resultsEl.addEventListener("click", (event) => {
   if (!button || !lastModel) return;
   selectedRouteIndex = Number(button.dataset.routeIndex);
   renderAll(lastModel);
+});
+
+resultsEl.addEventListener("change", (event) => {
+  const picker = event.target.closest(".rs-airfield-section-picker");
+  if (!picker) return;
+  activateAirfieldSection(picker.dataset.tabRoot, picker.value);
+});
+
+resultsEl.addEventListener("shown.bs.tab", (event) => {
+  const tabButton = event.target.closest("[data-bs-target]");
+  if (!tabButton) return;
+  const tabRoot = tabButton.closest(".rs-airfield-tabs");
+  if (!tabRoot) return;
+  const paneSelector = tabButton.getAttribute("data-bs-target") || "";
+  if (!paneSelector.startsWith("#")) return;
+  const picker = document.querySelector(`.rs-airfield-section-picker[data-tab-root="${tabRoot.id}"]`);
+  if (picker) picker.value = paneSelector.slice(1);
 });
 
 formEl.addEventListener("submit", async (event) => {
@@ -1295,7 +1312,18 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
 
   return `
     <div>
-      <ul class="nav nav-tabs rs-airfield-tabs" id="${tabId}" role="tablist">
+      <div class="mb-2 d-md-none">
+        <label class="form-label small text-secondary mb-1" for="${tabId}-picker">Section</label>
+        <select id="${tabId}-picker" class="form-select form-select-sm rs-airfield-section-picker" data-tab-root="${tabId}">
+          <option value="${overviewTab}">Overview</option>
+          <option value="${primaryTab}" selected>Primary Approaches</option>
+          <option value="${alternateTab}">Other Approaches</option>
+          <option value="${opsTab}">Ops Notes</option>
+          <option value="${scoringTab}">Scoring &amp; Source</option>
+        </select>
+      </div>
+
+      <ul class="nav nav-tabs rs-airfield-tabs d-none d-md-flex" id="${tabId}" role="tablist">
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="${overviewTab}-tab" data-bs-toggle="tab" data-bs-target="#${overviewTab}" type="button" role="tab" aria-controls="${overviewTab}" aria-selected="false">Overview</button>
         </li>
@@ -1349,6 +1377,31 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
       </div>
     </div>
   `;
+}
+
+function activateAirfieldSection(tabRootId, paneId) {
+  if (!tabRootId || !paneId) return;
+  const tabRoot = document.getElementById(tabRootId);
+  const targetPane = document.getElementById(paneId);
+  if (!targetPane) return;
+
+  const targetButton = tabRoot?.querySelector(`[data-bs-target="#${paneId}"]`);
+  if (targetButton && window.bootstrap?.Tab) {
+    window.bootstrap.Tab.getOrCreateInstance(targetButton).show();
+  } else {
+    const paneContainer = targetPane.closest(".tab-content");
+    paneContainer?.querySelectorAll(".tab-pane").forEach((pane) => pane.classList.remove("show", "active"));
+    targetPane.classList.add("show", "active");
+
+    tabRoot?.querySelectorAll(".nav-link").forEach((link) => {
+      link.classList.remove("active");
+      link.setAttribute("aria-selected", "false");
+    });
+    if (targetButton) {
+      targetButton.classList.add("active");
+      targetButton.setAttribute("aria-selected", "true");
+    }
+  }
 }
 
 function scoreBand(score) {
