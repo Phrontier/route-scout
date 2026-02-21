@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.22";
+const APP_VERSION = "0.0.23";
 const VERSION_FILE_PATH = "version.json";
 const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -1032,7 +1032,10 @@ async function fetchApproaches(ident, supplementalCharts = null) {
   try {
     const params = new URLSearchParams({ apt: ident, group: "6" });
     const json = await fetchJsonFromAny([`${AVIATION_API_CHARTS}?${params.toString()}`]);
-    const rows = json[ident];
+    const identUpper = String(ident || "").toUpperCase();
+    const identLower = identUpper.toLowerCase();
+    const ident3 = identUpper.startsWith("K") ? identUpper.slice(1) : identUpper;
+    const rows = json?.[identUpper] || json?.[identLower] || json?.[ident3] || json?.[ident3.toLowerCase()] || (Array.isArray(json) ? json : null);
     if (!Array.isArray(rows)) {
       cache.approachesByAirport.set(ident, []);
       return [];
@@ -1120,10 +1123,25 @@ async function fetchAviationChartsJson(ident) {
 
 function mapAviationChartsJson(json, airportCode) {
   if (!json || typeof json !== "object") return { allCharts: [], approaches: [] };
-  const root = json[airportCode] || json[airportCode.toLowerCase()] || json[airportCode.slice(1)] || json[airportCode.slice(1).toLowerCase()] || json;
+  const airportLower = airportCode.toLowerCase();
+  const airport3 = airportCode.startsWith("K") ? airportCode.slice(1) : airportCode;
+  const airport3Lower = airport3.toLowerCase();
+  const root = json[airportCode] || json[airportLower] || json[airport3] || json[airport3Lower] || json;
   if (!root || typeof root !== "object") return { allCharts: [], approaches: [] };
 
   const rows = [];
+
+  if (Array.isArray(root)) {
+    for (const item of root) {
+      if (!item || typeof item !== "object") continue;
+      const section = String(item?.chart_code || item?.chartCode || item?.section || item?.category || "UNKNOWN").toUpperCase();
+      const name = String(item?.chart_name || item?.chartName || item?.name || "").trim();
+      if (!name) continue;
+      const pdf = normalizeApproachPdfUrl(item?.pdf_path || item?.pdfPath || item?.pdf || null, "https://api.aviationapi.com");
+      rows.push({ name, pdf, section, source: "AviationAPI JSON" });
+    }
+  }
+
   for (const [sectionRaw, list] of Object.entries(root)) {
     if (!Array.isArray(list)) continue;
     const section = String(sectionRaw || "UNKNOWN").toUpperCase();
