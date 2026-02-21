@@ -14,12 +14,20 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.23";
+const APP_VERSION = "0.0.24";
 const VERSION_FILE_PATH = "version.json";
 const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
 const PROXY_PATH = "/proxy";
+const MAP_STYLE_STREET = "street";
+const MAP_STYLE_IFR_LOW = "ifr_low";
+const MAP_STYLE_IFR_HIGH = "ifr_high";
+const MAP_STYLE_OPTIONS = [
+  { value: MAP_STYLE_STREET, label: "Street" },
+  { value: MAP_STYLE_IFR_LOW, label: "IFR Low" },
+  { value: MAP_STYLE_IFR_HIGH, label: "IFR High" }
+];
 const SINGLE_PROFILE_POOL_SIZE = 45;
 const DOUBLE_PROFILE_POOL_SIZE = 80;
 const TRIPLE_PROFILE_POOL_SIZE = 70;
@@ -112,6 +120,7 @@ let lastModel = null;
 const expandedRouteIds = new Set();
 let visibleRouteCount = 10;
 const routeMapInstances = new Map();
+const mapStyleById = new Map();
 let loadingTickerId = null;
 let loadingStartedAt = 0;
 let loadingQueue = [];
@@ -187,8 +196,21 @@ resultsEl.addEventListener("click", (event) => {
 
 resultsEl.addEventListener("change", (event) => {
   const picker = event.target.closest(".rs-airfield-section-picker");
-  if (!picker) return;
-  activateAirfieldSection(picker.dataset.tabRoot, picker.value);
+  if (picker) {
+    activateAirfieldSection(picker.dataset.tabRoot, picker.value);
+    return;
+  }
+
+  const styleSelect = event.target.closest(".rs-map-style-select");
+  if (styleSelect) {
+    const mapId = String(styleSelect.dataset.mapId || "");
+    const style = String(styleSelect.value || MAP_STYLE_STREET);
+    if (mapId) {
+      mapStyleById.set(mapId, style);
+      const ctx = routeMapInstances.get(mapId);
+      if (ctx) applyMapStyle(ctx, style, true);
+    }
+  }
 });
 
 resultsEl.addEventListener("shown.bs.tab", (event) => {
@@ -1409,7 +1431,15 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
             </div>
           </div>
           <div class="mt-3 pt-3 border-top">
-            <div class="fw-semibold mb-2">Route Quick Map</div>
+            <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-2">
+              <div class="fw-semibold">Route Quick Map</div>
+              <div class="d-flex align-items-center gap-2">
+                <label class="small text-secondary mb-0" for="${mapId}-style">Map</label>
+                <select id="${mapId}-style" class="form-select form-select-sm rs-map-style-select" data-map-id="${mapId}">
+                  ${MAP_STYLE_OPTIONS.map((opt) => `<option value="${opt.value}" ${opt.value === MAP_STYLE_STREET ? "selected" : ""}>${opt.label}</option>`).join("")}
+                </select>
+              </div>
+            </div>
             <div id="${mapId}" class="rs-route-map border rounded-3"></div>
           </div>
         </div>
@@ -1648,8 +1678,8 @@ function renderRouteMap(route, origin, mapId) {
   if (!mapEl || typeof window.L === "undefined") return;
 
   const existing = routeMapInstances.get(mapId);
-  if (existing) {
-    existing.remove();
+  if (existing?.map) {
+    existing.map.remove();
     routeMapInstances.delete(mapId);
   }
 
@@ -1658,22 +1688,74 @@ function renderRouteMap(route, origin, mapId) {
     .map((p) => [p.lat, p.lon]);
   if (!points.length) return;
 
-  const mapInstance = window.L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
-  window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+  const map = window.L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
+  const streetLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 13,
     attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(mapInstance);
+  });
+  const ifrLowLayer = window.L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/IFR_AreaLow/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 13,
+    attribution: "FAA/Esri IFR Low"
+  });
+  const ifrHighLayer = window.L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/IFR_High/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 13,
+    attribution: "FAA/Esri IFR High"
+  });
 
-  const polyline = window.L.polyline(points, { color: "#0a5d8f", weight: 4 }).addTo(mapInstance);
-  window.L.marker([origin.lat, origin.lon]).addTo(mapInstance).bindPopup(`Origin: ${origin.ident}`);
+  const ctx = {
+    mapId,
+    map,
+    layers: {
+      [MAP_STYLE_STREET]: streetLayer,
+      [MAP_STYLE_IFR_LOW]: ifrLowLayer,
+      [MAP_STYLE_IFR_HIGH]: ifrHighLayer
+    },
+    activeStyle: MAP_STYLE_STREET,
+    fallbackInProgress: false
+  };
+
+  const onIfrTileError = () => {
+    if (ctx.activeStyle === MAP_STYLE_STREET || ctx.fallbackInProgress) return;
+    ctx.fallbackInProgress = true;
+    applyMapStyle(ctx, MAP_STYLE_STREET, false);
+    const select = document.querySelector(`.rs-map-style-select[data-map-id="${ctx.mapId}"]`);
+    if (select) select.value = MAP_STYLE_STREET;
+    setTimeout(() => {
+      ctx.fallbackInProgress = false;
+    }, 400);
+  };
+
+  ifrLowLayer.on("tileerror", onIfrTileError);
+  ifrHighLayer.on("tileerror", onIfrTileError);
+
+  streetLayer.addTo(map);
+
+  const polyline = window.L.polyline(points, { color: "#0a5d8f", weight: 4 }).addTo(map);
+  window.L.marker([origin.lat, origin.lon]).addTo(map).bindPopup(`Origin: ${origin.ident}`);
 
   for (const stop of route.stops) {
-    window.L.marker([stop.lat, stop.lon]).addTo(mapInstance).bindPopup(`${stop.ident} - ${stop.name || "Stop"}`);
+    window.L.marker([stop.lat, stop.lon]).addTo(map).bindPopup(`${stop.ident} - ${stop.name || "Stop"}`);
   }
 
-  mapInstance.fitBounds(polyline.getBounds(), { padding: [18, 18] });
-  routeMapInstances.set(mapId, mapInstance);
-  setTimeout(() => mapInstance.invalidateSize(), 0);
+  map.fitBounds(polyline.getBounds(), { padding: [18, 18] });
+  routeMapInstances.set(mapId, ctx);
+  const desiredStyle = mapStyleById.get(mapId) || MAP_STYLE_STREET;
+  applyMapStyle(ctx, desiredStyle, true);
+  setTimeout(() => map.invalidateSize(), 0);
+}
+
+function applyMapStyle(ctx, style, persistSelection) {
+  const chosenStyle = ctx.layers[style] ? style : MAP_STYLE_STREET;
+  if (persistSelection) mapStyleById.set(ctx.mapId, chosenStyle);
+
+  const currentLayer = ctx.layers[ctx.activeStyle];
+  if (currentLayer && ctx.map.hasLayer(currentLayer)) {
+    ctx.map.removeLayer(currentLayer);
+  }
+
+  const nextLayer = ctx.layers[chosenStyle] || ctx.layers[MAP_STYLE_STREET];
+  nextLayer.addTo(ctx.map);
+  ctx.activeStyle = chosenStyle;
 }
 
 function dedupeApproaches(rows) {

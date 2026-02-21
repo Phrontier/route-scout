@@ -21,4 +21,4 @@ Looking for bad ideas so we can avoid them professionally...
 This is taking longer than planned. We are still working on your route.
 Still crunching. Sorry this is taking so long to do your own work for you.
 Long load detected. The planner is busy overthinking every approach option.
-Yes, it is still loading. No, the airplane isn't going to file itself.
+Yes, it is still loading. No, the flight plan isn't going to file itself.

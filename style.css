@@ -132,9 +132,10 @@ body {
 }
 
 .rs-disclaimer {
-  border: 1px solid #d4e1ec;
-  background: #f8fbfe;
-  color: #476075;
+  border: 1px solid #efc7c4;
+  border-left: 5px solid #b3261e;
+  background: #fff1f0;
+  color: #7e1f1b;
 }
 
 .rs-route-selected {
@@ -241,8 +242,12 @@ body {
   background: #eef3f8;
 }
 
+.rs-map-style-select {
+  min-width: 132px;
+}
+
 #results .card:hover {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 #results a {
