@@ -115,17 +115,26 @@ body {
 
 .rs-status-loading {
   position: relative;
+  align-items: flex-start !important;
 }
 
 .rs-status-loading::before {
   content: "";
+  flex: 0 0 14px;
   width: 14px;
   height: 14px;
+  margin-top: 0.18rem;
   border: 2px solid #9eb9d6;
   border-top-color: var(--rs-brand);
   border-radius: 999px;
   display: inline-block;
   animation: rs-spin 0.9s linear infinite;
+}
+
+.rs-disclaimer {
+  border: 1px solid #d4e1ec;
+  background: #f8fbfe;
+  color: #476075;
 }
 
 .rs-route-selected {
@@ -256,6 +265,10 @@ main {
 
   .rs-route-map {
     height: 220px;
+  }
+
+  #status {
+    align-items: flex-start !important;
   }
 }
 

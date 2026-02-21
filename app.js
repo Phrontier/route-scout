@@ -14,8 +14,9 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.19";
+const APP_VERSION = "0.0.20";
 const VERSION_FILE_PATH = "version.json";
+const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
 const PROFILE_BUILD_CONCURRENCY = 6;
 const PROXY_PATH = "/proxy";
@@ -109,13 +110,14 @@ const approachTypeInputs = [...formEl.querySelectorAll('input[name="approachType
 
 let lastModel = null;
 let selectedRouteIndex = 0;
+let visibleRouteCount = 10;
 let routeMapInstance = null;
 let loadingTickerId = null;
 let loadingStartedAt = 0;
 let loadingQueue = [];
 let loadingLongWaitQueue = [];
 
-const LOADING_PHRASES = [
+const DEFAULT_LOADING_PHRASES = [
   "Comparing runway winds with likely traffic flows...",
   "Reading approach plate metadata and building training sets...",
   "Ranking route options by training value...",
@@ -135,15 +137,18 @@ const LOADING_PHRASES = [
   "Looking for bad ideas so we can avoid them professionally..."
 ];
 
-const LONG_WAIT_PHRASES = [
+const DEFAULT_LONG_WAIT_PHRASES = [
   "This is taking longer than planned. We are still working on your route.",
   "Still crunching. Sorry this is taking so long to do your own work for you.",
   "Long load detected. The planner is busy overthinking every approach option.",
   "Yes, it is still loading. No, the airplane isn't going to file itself."
 ];
+let loadingPhrases = [...DEFAULT_LOADING_PHRASES];
+let longWaitPhrases = [...DEFAULT_LONG_WAIT_PHRASES];
 
 dateInput.value = new Date().toISOString().slice(0, 10);
 initVersionTicker();
+void initLoadingPhrases();
 updateDistanceControl(typeInput.value);
 typeInput.addEventListener("change", () => updateDistanceControl(typeInput.value));
 distanceInput.addEventListener("input", () => {
@@ -164,10 +169,27 @@ for (const input of approachTypeInputs) {
 syncApproachTypeUI();
 
 resultsEl.addEventListener("click", (event) => {
+  const loadMoreBtn = event.target.closest("button[data-action='load-more']");
+  if (loadMoreBtn && lastModel) {
+    visibleRouteCount += 10;
+    renderAll(lastModel);
+    return;
+  }
+
   const button = event.target.closest("button[data-route-index]");
   if (!button || !lastModel) return;
-  selectedRouteIndex = Number(button.dataset.routeIndex);
+  const nextIndex = Number(button.dataset.routeIndex);
+  const clickedCard = button.closest("article[data-route-card-index]");
+  const beforeTop = clickedCard?.getBoundingClientRect().top;
+  selectedRouteIndex = nextIndex;
   renderAll(lastModel);
+  if (Number.isFinite(beforeTop)) {
+    const newCard = resultsEl.querySelector(`article[data-route-card-index="${nextIndex}"]`);
+    if (newCard) {
+      const afterTop = newCard.getBoundingClientRect().top;
+      window.scrollBy({ top: afterTop - beforeTop, left: 0, behavior: "auto" });
+    }
+  }
 });
 
 resultsEl.addEventListener("change", (event) => {
@@ -248,6 +270,7 @@ formEl.addEventListener("submit", async (event) => {
     };
 
     selectedRouteIndex = 0;
+    visibleRouteCount = 10;
     lastModel = model;
     renderAll(model);
     setStatus(`Generated ${routes.length} route options from ${origin.ident}.`);
@@ -301,8 +324,8 @@ function syncApproachTypeUI() {
 function startLoadingTicker() {
   stopLoadingTicker();
   loadingStartedAt = Date.now();
-  loadingQueue = shuffleCopy(LOADING_PHRASES);
-  loadingLongWaitQueue = shuffleCopy(LONG_WAIT_PHRASES);
+  loadingQueue = shuffleCopy(loadingPhrases);
+  loadingLongWaitQueue = shuffleCopy(longWaitPhrases);
   const first = loadingQueue.shift() || "Working on route options...";
   setStatus(first, false, true);
 
@@ -348,6 +371,43 @@ async function initVersionTicker() {
   }
 
   versionTickerEl.textContent = `Version v${version} (${channel})`;
+}
+
+async function initLoadingPhrases() {
+  try {
+    const response = await fetch(`${LOADING_MESSAGES_PATH}?t=${Date.now()}`, { cache: "no-store" });
+    if (!response.ok) return;
+    const text = await response.text();
+    const parsed = parseLoadingMessages(text);
+    if (parsed.normal.length) loadingPhrases = parsed.normal;
+    if (parsed.longWait.length) longWaitPhrases = parsed.longWait;
+  } catch (_error) {
+    // Keep defaults.
+  }
+}
+
+function parseLoadingMessages(text) {
+  const normal = [];
+  const longWait = [];
+  let section = "normal";
+
+  for (const rawLine of String(text || "").split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("#")) continue;
+    if (/^\[normal\]$/i.test(line)) {
+      section = "normal";
+      continue;
+    }
+    if (/^\[long_wait\]$/i.test(line)) {
+      section = "long_wait";
+      continue;
+    }
+
+    if (section === "long_wait") longWait.push(line);
+    else normal.push(line);
+  }
+
+  return { normal, longWait };
 }
 
 async function loadCoreData() {
@@ -576,7 +636,7 @@ function generateRoutes({ origin, profiles, flightType, maxLegNm, requiredApproa
       .sort((a, b) => b.score - a.score);
 
     return {
-      routes: allRoutes.slice(0, 10),
+      routes: allRoutes,
       routeStats: {
         preTopRouteCount: allRoutes.length
       }
@@ -620,7 +680,7 @@ function generateRoutes({ origin, profiles, flightType, maxLegNm, requiredApproa
 
   routes.sort((a, b) => b.score - a.score);
   return {
-    routes: routes.slice(0, 10),
+    routes,
     routeStats: {
       preTopRouteCount: routes.length
     }
@@ -748,9 +808,18 @@ function buildApproachStats(approaches, likelyRunwayIdent, allCharts = []) {
   const alternate = byRunway.length
     ? approaches.filter((a) => !chartLikelyForRunway(a.name, likelyRunwayIdent))
     : [];
+  const radarCharts = allCharts.filter((chart) => /(RADAR\s*MINIMUMS|RADMIN)/i.test(chart.name || ""));
+  const syntheticGcaApproaches = radarCharts.length
+    ? [{
+        name: "GCA (Radar minimums available)",
+        pdf: radarCharts.find((chart) => chart.pdf)?.pdf || null,
+        source: "AviationAPI HTML"
+      }]
+    : [];
+  const selectedWithGca = dedupeApproaches([...selected, ...syntheticGcaApproaches]);
 
   const likelyTypeSet = new Set();
-  for (const approach of selected) {
+  for (const approach of selectedWithGca) {
     classifyApproachTypes(approach.name).forEach((type) => likelyTypeSet.add(type));
   }
 
@@ -759,18 +828,18 @@ function buildApproachStats(approaches, likelyRunwayIdent, allCharts = []) {
     classifyApproachTypes(approach.name).forEach((type) => alternateTypeSet.add(type));
   }
 
-  const hasRadarMinimums = allCharts.some((chart) => /RADAR\s+MINIMUMS/i.test(chart.name || ""));
-  if (hasRadarMinimums) alternateTypeSet.add("GCA");
+  const hasRadarMinimums = radarCharts.length > 0;
+  if (hasRadarMinimums) likelyTypeSet.add("GCA");
 
   const airportDiagram = allCharts.find((chart) => /AIRPORT\s+DIAGRAM/i.test(chart.name || ""));
 
   return {
     countForRunway: byRunway.length,
     alternateCount: alternate.length,
-    totalCount: approaches.length,
+    totalCount: dedupeApproaches([...approaches, ...syntheticGcaApproaches]).length,
     typesLikely: [...likelyTypeSet].sort(),
     typesAlternate: [...alternateTypeSet].sort(),
-    selectedApproaches: selected,
+    selectedApproaches: selectedWithGca,
     alternateApproaches: alternate,
     airportDiagramPdf: airportDiagram?.pdf || null,
     hasRadarMinimums
@@ -786,6 +855,7 @@ function classifyApproachTypes(name) {
   if (n.includes("VOR") || n.includes("VORTAC")) out.push("VOR");
   if (n.includes("RNAV") || n.includes("GPS")) out.push("RNAV");
   if (n.includes("NDB")) out.push("NDB");
+  if (n.includes("GCA") || /RADAR\s*MINIMUMS|RADMIN/.test(n)) out.push("GCA");
   if (n.includes("TACAN")) out.push("TACAN");
   if (/\b[A-Z0-9]+-[A-Z]\b/.test(n)) out.push("CIRCLING");
 
@@ -1120,6 +1190,9 @@ function textOf(recordNode, tagName) {
 }
 
 function renderAll(model) {
+  const totalRoutes = model.routes.length;
+  const currentVisible = Math.min(visibleRouteCount, totalRoutes);
+  if (selectedRouteIndex >= currentVisible) selectedRouteIndex = 0;
   const selected = model.routes[selectedRouteIndex] || model.routes[0];
   const needed = (model.requiredApproachTypes || []).length
     ? ` | Needed: ${(model.requiredApproachTypes || []).join(", ")}`
@@ -1132,7 +1205,7 @@ function renderAll(model) {
       <div class="card-body py-3">
         <div class="fw-semibold">${model.origin.ident} | ${FLIGHT_RULES[model.flightType].label} | ${model.flightDate} ${model.timeLocal}</div>
         <div class="small text-secondary mt-1">
-          ${model.routes.length} route options ranked by training score (1-100).
+          Showing ${currentVisible} of ${totalRoutes} route options ranked by training score (1-100).
           Surface winds are Open-Meteo 10m winds in knots.${needed}
         </div>
         <div class="small text-secondary mt-1">
@@ -1143,7 +1216,8 @@ function renderAll(model) {
     </article>
   `;
 
-  const listHtml = model.routes
+  const visibleRoutes = model.routes.slice(0, currentVisible);
+  const listHtml = visibleRoutes
     .map((route, index) => {
       const band = scoreBand(route.score);
       const selectedClass = index === selectedRouteIndex ? " rs-route-selected" : "";
@@ -1151,7 +1225,7 @@ function renderAll(model) {
         ? routeDetailInlineHtml(route, model.origin, model.originProfile, mapContainerId(route))
         : "";
       return `
-        <article class="card border-0 shadow-sm${selectedClass}">
+        <article class="card border-0 shadow-sm${selectedClass}" data-route-card-index="${index}">
           <div class="card-body">
             <div class="d-flex align-items-start justify-content-between gap-3">
               <div>
@@ -1176,7 +1250,10 @@ function renderAll(model) {
       `;
     })
     .join("\n");
-  resultsEl.innerHTML = summaryHtml + `<section class="vstack gap-3">${listHtml}</section>`;
+  const loadMoreHtml = currentVisible < totalRoutes
+    ? `<div class="d-flex justify-content-center mt-2"><button class="btn btn-outline-primary" data-action="load-more">Load More</button></div>`
+    : "";
+  resultsEl.innerHTML = summaryHtml + `<section class="vstack gap-3">${listHtml}${loadMoreHtml}</section>`;
   if (selected) renderRouteMap(selected, model.origin, mapContainerId(selected));
 }
 
@@ -1303,30 +1380,26 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
   const towered = inferTowered(stop);
   const hasLighting = (stop.runways || []).some((r) => r.lighted);
   const tabId = `airfield-tabs-${String(stop.ident || "apt").toLowerCase()}-${String(keySuffix || title).replace(/[^a-zA-Z0-9_-]/g, "-")}`;
-  const overviewTab = `${tabId}-overview`;
   const primaryTab = `${tabId}-primary`;
   const alternateTab = `${tabId}-alternate`;
-  const opsTab = `${tabId}-ops`;
+  const opsTab = `${tabId}-airfield-ops`;
   const scoringTab = `${tabId}-scoring`;
   const likelyRunwayText = stop.likelyRunway ? `${stop.likelyRunway.runwayIdent}` : "N/A";
+  const chartsUrl = `https://www.aviationapi.com/charts?apt=${encodeURIComponent(stop.ident || "")}`;
 
   return `
     <div>
       <div class="mb-2 d-md-none">
         <label class="form-label small text-secondary mb-1" for="${tabId}-picker">Section</label>
         <select id="${tabId}-picker" class="form-select form-select-sm rs-airfield-section-picker" data-tab-root="${tabId}">
-          <option value="${overviewTab}">Overview</option>
           <option value="${primaryTab}" selected>Primary Approaches</option>
           <option value="${alternateTab}">Other Approaches</option>
-          <option value="${opsTab}">Ops Notes</option>
+          <option value="${opsTab}">Airfield &amp; Ops Notes</option>
           <option value="${scoringTab}">Scoring &amp; Source</option>
         </select>
       </div>
 
       <ul class="nav nav-tabs rs-airfield-tabs d-none d-md-flex" id="${tabId}" role="tablist">
-        <li class="nav-item" role="presentation">
-          <button class="nav-link" id="${overviewTab}-tab" data-bs-toggle="tab" data-bs-target="#${overviewTab}" type="button" role="tab" aria-controls="${overviewTab}" aria-selected="false">Overview</button>
-        </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link active" id="${primaryTab}-tab" data-bs-toggle="tab" data-bs-target="#${primaryTab}" type="button" role="tab" aria-controls="${primaryTab}" aria-selected="true">Primary Approaches</button>
         </li>
@@ -1334,22 +1407,13 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
           <button class="nav-link" id="${alternateTab}-tab" data-bs-toggle="tab" data-bs-target="#${alternateTab}" type="button" role="tab" aria-controls="${alternateTab}" aria-selected="false">Other Approaches</button>
         </li>
         <li class="nav-item" role="presentation">
-          <button class="nav-link" id="${opsTab}-tab" data-bs-toggle="tab" data-bs-target="#${opsTab}" type="button" role="tab" aria-controls="${opsTab}" aria-selected="false">Ops Notes</button>
+          <button class="nav-link" id="${opsTab}-tab" data-bs-toggle="tab" data-bs-target="#${opsTab}" type="button" role="tab" aria-controls="${opsTab}" aria-selected="false">Airfield & Ops Notes</button>
         </li>
         <li class="nav-item" role="presentation">
           <button class="nav-link" id="${scoringTab}-tab" data-bs-toggle="tab" data-bs-target="#${scoringTab}" type="button" role="tab" aria-controls="${scoringTab}" aria-selected="false">Scoring & Source</button>
         </li>
       </ul>
       <div class="tab-content border border-top-0 rounded-bottom p-3 rs-tab-content">
-        <div class="tab-pane fade" id="${overviewTab}" role="tabpanel" aria-labelledby="${overviewTab}-tab" tabindex="0">
-          <div class="d-flex flex-wrap gap-2 mb-2 small text-secondary">
-            <span class="badge text-bg-light border"><span class="rs-dot rs-dot-${runwayBand}"></span> Training Score ${stop.trainingScore}</span>
-            <span class="badge text-bg-light border">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
-            <span class="badge text-bg-light border">Likely RWY ${likelyRunwayText}</span>
-          </div>
-          <div class="small text-secondary">Runways: ${(stop.runways || []).length} | Elevation: ${stop.elevationFt ?? "N/A"} ft | Towered: ${towered ? "Yes" : "No"}</div>
-          ${stop.suitability.flags.length ? `<div class="small text-warning-emphasis mt-2">Caution: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
-        </div>
         <div class="tab-pane fade show active" id="${primaryTab}" role="tabpanel" aria-labelledby="${primaryTab}-tab" tabindex="0">
           ${filteredLikely.length
             ? `<ul class="list-group list-group-flush">${filteredLikely.map((a) => `<li class="list-group-item px-0">${approachLinkHtml(a)}</li>`).join("")}</ul>`
@@ -1361,12 +1425,21 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
             : "<div class=\"small text-secondary\">No additional approaches found.</div>"}
         </div>
         <div class="tab-pane fade" id="${opsTab}" role="tabpanel" aria-labelledby="${opsTab}-tab" tabindex="0">
+          <div class="d-flex flex-wrap gap-2 mb-2 small text-secondary">
+            <span class="badge text-bg-light border"><span class="rs-dot rs-dot-${runwayBand}"></span> Training Score ${stop.trainingScore}</span>
+            <span class="badge text-bg-light border">Wind ${stop.wind.directionDeg.toFixed(0)}° @ ${stop.wind.speedKt.toFixed(0)} kt</span>
+            <span class="badge text-bg-light border">Likely RWY ${likelyRunwayText}</span>
+          </div>
           <div class="small text-secondary">Towered: ${towered ? "Yes" : "No"}</div>
           <div class="small text-secondary">Lighting: ${hasLighting ? "Available" : "Unknown/Unlit"} | Elev: ${stop.elevationFt ?? "N/A"} ft</div>
           <div class="small text-secondary">Service: ${stop.scheduledService ? "Scheduled" : "Non-scheduled"}</div>
           <div class="small mt-2 fw-semibold">Available Runways</div>
           <ul class="small mb-2">${runwaysList || "<li>No runway records</li>"}</ul>
           ${stop.approachStats.hasRadarMinimums ? "<div class=\"small text-secondary\">Radar minimums published: GCA training capability available.</div>" : ""}
+          <div class="small mt-2">
+            ${stop.approachStats.airportDiagramPdf ? `<a href="${stop.approachStats.airportDiagramPdf}" target="_blank" rel="noopener noreferrer">Airport Diagram</a>` : "Airport Diagram: Unavailable"} |
+            <a href="${chartsUrl}" target="_blank" rel="noopener noreferrer">Chart Supplement / AviationAPI Charts</a>
+          </div>
           ${stop.suitability.flags.length ? `<div class="small text-warning-emphasis mt-2">Suitability flags: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
         </div>
         <div class="tab-pane fade" id="${scoringTab}" role="tabpanel" aria-labelledby="${scoringTab}-tab" tabindex="0">
