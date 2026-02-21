@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.20";
+const APP_VERSION = "0.0.21";
 const VERSION_FILE_PATH = "version.json";
 const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -109,9 +109,9 @@ const allApproachesInput = document.getElementById("all-approaches");
 const approachTypeInputs = [...formEl.querySelectorAll('input[name="approachType"]')];
 
 let lastModel = null;
-let selectedRouteIndex = 0;
+const expandedRouteIds = new Set();
 let visibleRouteCount = 10;
-let routeMapInstance = null;
+const routeMapInstances = new Map();
 let loadingTickerId = null;
 let loadingStartedAt = 0;
 let loadingQueue = [];
@@ -176,20 +176,13 @@ resultsEl.addEventListener("click", (event) => {
     return;
   }
 
-  const button = event.target.closest("button[data-route-index]");
+  const button = event.target.closest("button[data-route-id]");
   if (!button || !lastModel) return;
-  const nextIndex = Number(button.dataset.routeIndex);
-  const clickedCard = button.closest("article[data-route-card-index]");
-  const beforeTop = clickedCard?.getBoundingClientRect().top;
-  selectedRouteIndex = nextIndex;
+  const routeId = String(button.dataset.routeId || "");
+  if (!routeId) return;
+  if (expandedRouteIds.has(routeId)) expandedRouteIds.delete(routeId);
+  else expandedRouteIds.add(routeId);
   renderAll(lastModel);
-  if (Number.isFinite(beforeTop)) {
-    const newCard = resultsEl.querySelector(`article[data-route-card-index="${nextIndex}"]`);
-    if (newCard) {
-      const afterTop = newCard.getBoundingClientRect().top;
-      window.scrollBy({ top: afterTop - beforeTop, left: 0, behavior: "auto" });
-    }
-  }
 });
 
 resultsEl.addEventListener("change", (event) => {
@@ -269,7 +262,7 @@ formEl.addEventListener("submit", async (event) => {
       routeStats
     };
 
-    selectedRouteIndex = 0;
+    expandedRouteIds.clear();
     visibleRouteCount = 10;
     lastModel = model;
     renderAll(model);
@@ -808,8 +801,9 @@ function buildApproachStats(approaches, likelyRunwayIdent, allCharts = []) {
   const alternate = byRunway.length
     ? approaches.filter((a) => !chartLikelyForRunway(a.name, likelyRunwayIdent))
     : [];
-  const radarCharts = allCharts.filter((chart) => /(RADAR\s*MINIMUMS|RADMIN)/i.test(chart.name || ""));
-  const syntheticGcaApproaches = radarCharts.length
+  const radarCharts = allCharts.filter((chart) => /RADMIN|RADAR[\s\-_/]*MIN(?:IMUMS?)?/i.test(chart.name || ""));
+  const hasExistingGca = selected.some((approach) => classifyApproachTypes(approach.name).includes("GCA"));
+  const syntheticGcaApproaches = (radarCharts.length && !hasExistingGca)
     ? [{
         name: "GCA (Radar minimums available)",
         pdf: radarCharts.find((chart) => chart.pdf)?.pdf || null,
@@ -842,7 +836,9 @@ function buildApproachStats(approaches, likelyRunwayIdent, allCharts = []) {
     selectedApproaches: selectedWithGca,
     alternateApproaches: alternate,
     airportDiagramPdf: airportDiagram?.pdf || null,
-    hasRadarMinimums
+    hasRadarMinimums,
+    radarChartCount: radarCharts.length,
+    chartCount: allCharts.length
   };
 }
 
@@ -855,7 +851,7 @@ function classifyApproachTypes(name) {
   if (n.includes("VOR") || n.includes("VORTAC")) out.push("VOR");
   if (n.includes("RNAV") || n.includes("GPS")) out.push("RNAV");
   if (n.includes("NDB")) out.push("NDB");
-  if (n.includes("GCA") || /RADAR\s*MINIMUMS|RADMIN/.test(n)) out.push("GCA");
+  if (n.includes("GCA") || /RADMIN|RADAR[\s\-_/]*MIN(?:IMUMS?)?/.test(n)) out.push("GCA");
   if (n.includes("TACAN")) out.push("TACAN");
   if (/\b[A-Z0-9]+-[A-Z]\b/.test(n)) out.push("CIRCLING");
 
@@ -1067,11 +1063,32 @@ async function fetchApproaches(ident, supplementalCharts = null) {
 async function fetchAviationHtmlCharts(ident) {
   if (cache.aviationChartsByAirport.has(ident)) return cache.aviationChartsByAirport.get(ident);
 
-  const html = await fetchTextFromAny([
-    `https://www.aviationapi.com/charts?apt=${encodeURIComponent(ident)}`,
-    `https://www.aviationapi.com/charts/?apt=${encodeURIComponent(ident)}`
-  ]);
+  const airportCode = String(ident || "").trim();
+  const lowerCode = airportCode.toLowerCase();
+  const urlCandidates = [
+    `https://www.aviationapi.com/charts?airport=${encodeURIComponent(lowerCode)}`,
+    `https://www.aviationapi.com/charts/?airport=${encodeURIComponent(lowerCode)}`,
+    `https://www.aviationapi.com/charts?apt=${encodeURIComponent(airportCode)}`,
+    `https://www.aviationapi.com/charts/?apt=${encodeURIComponent(airportCode)}`
+  ];
 
+  let bundle = { allCharts: [], approaches: [] };
+  for (const url of urlCandidates) {
+    try {
+      const html = await fetchTextFromAny([url]);
+      const parsed = parseAviationChartsHtml(html);
+      bundle = parsed;
+      if (parsed.allCharts.length) break;
+    } catch (_error) {
+      // try next URL candidate
+    }
+  }
+
+  cache.aviationChartsByAirport.set(ident, bundle);
+  return bundle;
+}
+
+function parseAviationChartsHtml(html) {
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, "text/html");
   const tables = [...doc.querySelectorAll("table")];
@@ -1089,16 +1106,13 @@ async function fetchAviationHtmlCharts(ident) {
 
       let pdf = firstLink?.getAttribute("href") || null;
       pdf = normalizeApproachPdfUrl(pdf, "https://www.aviationapi.com");
-
       allCharts.push({ name, pdf, section, source: "AviationAPI HTML" });
     }
   }
 
   const dedupedAll = dedupeApproaches(allCharts);
   const approaches = dedupeApproaches(dedupedAll.filter((chart) => isApproachChartRow(chart)));
-  const bundle = { allCharts: dedupedAll, approaches };
-  cache.aviationChartsByAirport.set(ident, bundle);
-  return bundle;
+  return { allCharts: dedupedAll, approaches };
 }
 
 async function getFaaApproachMap() {
@@ -1192,8 +1206,6 @@ function textOf(recordNode, tagName) {
 function renderAll(model) {
   const totalRoutes = model.routes.length;
   const currentVisible = Math.min(visibleRouteCount, totalRoutes);
-  if (selectedRouteIndex >= currentVisible) selectedRouteIndex = 0;
-  const selected = model.routes[selectedRouteIndex] || model.routes[0];
   const needed = (model.requiredApproachTypes || []).length
     ? ` | Needed: ${(model.requiredApproachTypes || []).join(", ")}`
     : "";
@@ -1217,11 +1229,17 @@ function renderAll(model) {
   `;
 
   const visibleRoutes = model.routes.slice(0, currentVisible);
+  const visibleRouteIdSet = new Set(visibleRoutes.map((r) => r.id));
+  for (const routeId of [...expandedRouteIds]) {
+    if (!visibleRouteIdSet.has(routeId)) expandedRouteIds.delete(routeId);
+  }
+
   const listHtml = visibleRoutes
     .map((route, index) => {
       const band = scoreBand(route.score);
-      const selectedClass = index === selectedRouteIndex ? " rs-route-selected" : "";
-      const expandedHtml = index === selectedRouteIndex
+      const isExpanded = expandedRouteIds.has(route.id);
+      const selectedClass = isExpanded ? " rs-route-selected" : "";
+      const expandedHtml = isExpanded
         ? routeDetailInlineHtml(route, model.origin, model.originProfile, mapContainerId(route))
         : "";
       return `
@@ -1240,9 +1258,9 @@ function renderAll(model) {
             </div>
 
             <div>
-            ${index === selectedRouteIndex
-              ? "<span class=\"badge text-bg-secondary\">Selected</span>"
-              : `<button class="btn btn-outline-primary btn-sm" data-route-index="${index}">Show More</button>`}
+            ${isExpanded
+              ? `<button class="btn btn-outline-secondary btn-sm" data-route-id="${route.id}">Hide Details</button>`
+              : `<button class="btn btn-outline-primary btn-sm" data-route-id="${route.id}">Show More</button>`}
             </div>
             ${expandedHtml}
           </div>
@@ -1254,7 +1272,19 @@ function renderAll(model) {
     ? `<div class="d-flex justify-content-center mt-2"><button class="btn btn-outline-primary" data-action="load-more">Load More</button></div>`
     : "";
   resultsEl.innerHTML = summaryHtml + `<section class="vstack gap-3">${listHtml}${loadMoreHtml}</section>`;
-  if (selected) renderRouteMap(selected, model.origin, mapContainerId(selected));
+
+  const activeMapIds = new Set();
+  for (const route of visibleRoutes) {
+    if (!expandedRouteIds.has(route.id)) continue;
+    const mapId = mapContainerId(route);
+    activeMapIds.add(mapId);
+    renderRouteMap(route, model.origin, mapId);
+  }
+  for (const [mapId, instance] of routeMapInstances.entries()) {
+    if (activeMapIds.has(mapId)) continue;
+    instance.remove();
+    routeMapInstances.delete(mapId);
+  }
 }
 
 function stopOverviewHtml(stop) {
@@ -1385,7 +1415,7 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
   const opsTab = `${tabId}-airfield-ops`;
   const scoringTab = `${tabId}-scoring`;
   const likelyRunwayText = stop.likelyRunway ? `${stop.likelyRunway.runwayIdent}` : "N/A";
-  const chartsUrl = `https://www.aviationapi.com/charts?apt=${encodeURIComponent(stop.ident || "")}`;
+  const chartsUrl = `https://www.aviationapi.com/charts?airport=${encodeURIComponent(String(stop.ident || "").toLowerCase())}`;
 
   return `
     <div>
@@ -1445,6 +1475,7 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
         <div class="tab-pane fade" id="${scoringTab}" role="tabpanel" aria-labelledby="${scoringTab}-tab" tabindex="0">
           <div class="small text-secondary">Score: diversity ${Math.round(stop.scoreBreakdown.diversity)}, quantity ${Math.round(stop.scoreBreakdown.quantity)}, wind ${Math.round(stop.scoreBreakdown.wind)}, runway ${Math.round(stop.scoreBreakdown.runway)}, suitability penalty ${Math.round(stop.scoreBreakdown.suitabilityPenalty)}.</div>
           <div class="small text-secondary mt-1">Approach data source: ${approachSources.length ? approachSources.join(", ") : "Unavailable"}</div>
+          <div class="small text-secondary mt-1">Chart metadata: ${stop.approachStats.chartCount ?? 0} charts | Radar mins detected: ${stop.approachStats.hasRadarMinimums ? "Yes" : "No"}</div>
           ${!INCLUDE_TACAN_FOR_T6_SCORING ? "<div class=\"small text-secondary mt-1\">TACAN approaches are available in backend data but excluded from T-6 scoring/output.</div>" : ""}
         </div>
       </div>
@@ -1541,9 +1572,10 @@ function renderRouteMap(route, origin, mapId) {
   const mapEl = document.getElementById(mapId);
   if (!mapEl || typeof window.L === "undefined") return;
 
-  if (routeMapInstance) {
-    routeMapInstance.remove();
-    routeMapInstance = null;
+  const existing = routeMapInstances.get(mapId);
+  if (existing) {
+    existing.remove();
+    routeMapInstances.delete(mapId);
   }
 
   const points = [origin, ...route.stops, origin]
@@ -1551,21 +1583,22 @@ function renderRouteMap(route, origin, mapId) {
     .map((p) => [p.lat, p.lon]);
   if (!points.length) return;
 
-  routeMapInstance = window.L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
+  const mapInstance = window.L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
   window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 13,
     attribution: "&copy; OpenStreetMap contributors"
-  }).addTo(routeMapInstance);
+  }).addTo(mapInstance);
 
-  const polyline = window.L.polyline(points, { color: "#0a5d8f", weight: 4 }).addTo(routeMapInstance);
-  window.L.marker([origin.lat, origin.lon]).addTo(routeMapInstance).bindPopup(`Origin: ${origin.ident}`);
+  const polyline = window.L.polyline(points, { color: "#0a5d8f", weight: 4 }).addTo(mapInstance);
+  window.L.marker([origin.lat, origin.lon]).addTo(mapInstance).bindPopup(`Origin: ${origin.ident}`);
 
   for (const stop of route.stops) {
-    window.L.marker([stop.lat, stop.lon]).addTo(routeMapInstance).bindPopup(`${stop.ident} - ${stop.name || "Stop"}`);
+    window.L.marker([stop.lat, stop.lon]).addTo(mapInstance).bindPopup(`${stop.ident} - ${stop.name || "Stop"}`);
   }
 
-  routeMapInstance.fitBounds(polyline.getBounds(), { padding: [18, 18] });
-  setTimeout(() => routeMapInstance?.invalidateSize(), 0);
+  mapInstance.fitBounds(polyline.getBounds(), { padding: [18, 18] });
+  routeMapInstances.set(mapId, mapInstance);
+  setTimeout(() => mapInstance.invalidateSize(), 0);
 }
 
 function dedupeApproaches(rows) {
