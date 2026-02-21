@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.21";
+const APP_VERSION = "0.0.22";
 const VERSION_FILE_PATH = "version.json";
 const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -825,7 +825,8 @@ function buildApproachStats(approaches, likelyRunwayIdent, allCharts = []) {
   const hasRadarMinimums = radarCharts.length > 0;
   if (hasRadarMinimums) likelyTypeSet.add("GCA");
 
-  const airportDiagram = allCharts.find((chart) => /AIRPORT\s+DIAGRAM/i.test(chart.name || ""));
+  const airportDiagram = allCharts.find((chart) => /AIRPORT\s+DIAGRAM|\bAPD\b/i.test(chart.name || ""));
+  const chartSupplement = allCharts.find((chart) => /CHART\s+SUPP|SUPPLEMENT|A\/FD|AIRPORT\s+FACILITY/i.test(chart.name || ""));
 
   return {
     countForRunway: byRunway.length,
@@ -836,6 +837,7 @@ function buildApproachStats(approaches, likelyRunwayIdent, allCharts = []) {
     selectedApproaches: selectedWithGca,
     alternateApproaches: alternate,
     airportDiagramPdf: airportDiagram?.pdf || null,
+    chartSupplementPdf: chartSupplement?.pdf || null,
     hasRadarMinimums,
     radarChartCount: radarCharts.length,
     chartCount: allCharts.length
@@ -1063,6 +1065,12 @@ async function fetchApproaches(ident, supplementalCharts = null) {
 async function fetchAviationHtmlCharts(ident) {
   if (cache.aviationChartsByAirport.has(ident)) return cache.aviationChartsByAirport.get(ident);
 
+  const jsonBundle = await fetchAviationChartsJson(ident);
+  if (jsonBundle.allCharts.length) {
+    cache.aviationChartsByAirport.set(ident, jsonBundle);
+    return jsonBundle;
+  }
+
   const airportCode = String(ident || "").trim();
   const lowerCode = airportCode.toLowerCase();
   const urlCandidates = [
@@ -1086,6 +1094,50 @@ async function fetchAviationHtmlCharts(ident) {
 
   cache.aviationChartsByAirport.set(ident, bundle);
   return bundle;
+}
+
+async function fetchAviationChartsJson(ident) {
+  const airportCode = String(ident || "").trim().toUpperCase();
+  if (!airportCode) return { allCharts: [], approaches: [] };
+
+  const urlCandidates = [
+    `https://api.aviationapi.com/v1/charts?apt=${encodeURIComponent(airportCode)}`,
+    `https://api.aviationapi.com/v1/charts?airport=${encodeURIComponent(airportCode)}`
+  ];
+
+  for (const url of urlCandidates) {
+    try {
+      const json = await fetchJsonFromAny([url]);
+      const mapped = mapAviationChartsJson(json, airportCode);
+      if (mapped.allCharts.length) return mapped;
+    } catch (_error) {
+      // try next
+    }
+  }
+
+  return { allCharts: [], approaches: [] };
+}
+
+function mapAviationChartsJson(json, airportCode) {
+  if (!json || typeof json !== "object") return { allCharts: [], approaches: [] };
+  const root = json[airportCode] || json[airportCode.toLowerCase()] || json[airportCode.slice(1)] || json[airportCode.slice(1).toLowerCase()] || json;
+  if (!root || typeof root !== "object") return { allCharts: [], approaches: [] };
+
+  const rows = [];
+  for (const [sectionRaw, list] of Object.entries(root)) {
+    if (!Array.isArray(list)) continue;
+    const section = String(sectionRaw || "UNKNOWN").toUpperCase();
+    for (const item of list) {
+      const name = String(item?.chart_name || item?.chartName || item?.name || "").trim();
+      if (!name) continue;
+      const pdf = normalizeApproachPdfUrl(item?.pdf_path || item?.pdfPath || item?.pdf || null, "https://api.aviationapi.com");
+      rows.push({ name, pdf, section, source: "AviationAPI JSON" });
+    }
+  }
+
+  const allCharts = dedupeApproaches(rows);
+  const approaches = dedupeApproaches(allCharts.filter((chart) => isApproachChartRow(chart)));
+  return { allCharts, approaches };
 }
 
 function parseAviationChartsHtml(html) {
@@ -1415,7 +1467,10 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
   const opsTab = `${tabId}-airfield-ops`;
   const scoringTab = `${tabId}-scoring`;
   const likelyRunwayText = stop.likelyRunway ? `${stop.likelyRunway.runwayIdent}` : "N/A";
-  const chartsUrl = `https://www.aviationapi.com/charts?airport=${encodeURIComponent(String(stop.ident || "").toLowerCase())}`;
+  const airportIdent = String(stop.ident || "").trim().toLowerCase();
+  const chartsUrl = airportIdent
+    ? `https://www.aviationapi.com/charts?airport=${encodeURIComponent(airportIdent)}`
+    : "https://www.aviationapi.com/charts";
 
   return `
     <div>
@@ -1468,7 +1523,9 @@ function airfieldDetailCardHtml(stop, title, keySuffix = "") {
           ${stop.approachStats.hasRadarMinimums ? "<div class=\"small text-secondary\">Radar minimums published: GCA training capability available.</div>" : ""}
           <div class="small mt-2">
             ${stop.approachStats.airportDiagramPdf ? `<a href="${stop.approachStats.airportDiagramPdf}" target="_blank" rel="noopener noreferrer">Airport Diagram</a>` : "Airport Diagram: Unavailable"} |
-            <a href="${chartsUrl}" target="_blank" rel="noopener noreferrer">Chart Supplement / AviationAPI Charts</a>
+            ${stop.approachStats.chartSupplementPdf
+              ? `<a href="${stop.approachStats.chartSupplementPdf}" target="_blank" rel="noopener noreferrer">Chart Supplement PDF</a>`
+              : `<a href="${chartsUrl}" target="_blank" rel="noopener noreferrer">Chart Supplement / AviationAPI Charts</a>`}
           </div>
           ${stop.suitability.flags.length ? `<div class="small text-warning-emphasis mt-2">Suitability flags: ${escapeHtml(stop.suitability.flags.join("; "))}. Check IFR supplement for PPR/remarks.</div>` : ""}
         </div>
