@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.26";
+const APP_VERSION = "0.0.27";
 const VERSION_FILE_PATH = "version.json";
 const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -121,12 +121,20 @@ const distanceHelpEl = document.getElementById("distance-help");
 const generateBtn = document.getElementById("generate-btn");
 const allApproachesInput = document.getElementById("all-approaches");
 const approachTypeInputs = [...formEl.querySelectorAll('input[name="approachType"]')];
+const mapModalEl = document.getElementById("route-map-modal");
+const mapModalTitleEl = document.getElementById("route-map-modal-title");
+const mapModalStyleEl = document.getElementById("route-map-modal-style");
+const mapModalCanvasEl = document.getElementById("route-map-modal-canvas");
+const mapModalNoteEl = document.getElementById("route-map-modal-note");
 
 let lastModel = null;
 const expandedRouteIds = new Set();
 let visibleRouteCount = 10;
 const routeMapInstances = new Map();
 const mapStyleById = new Map();
+let mapModalInstance = null;
+let mapModalCtx = null;
+let mapModalMapId = null;
 let loadingTickerId = null;
 let loadingStartedAt = 0;
 let loadingQueue = [];
@@ -182,12 +190,20 @@ for (const input of approachTypeInputs) {
   });
 }
 syncApproachTypeUI();
+initMapModal();
 
 resultsEl.addEventListener("click", (event) => {
   const loadMoreBtn = event.target.closest("button[data-action='load-more']");
   if (loadMoreBtn && lastModel) {
     visibleRouteCount += 10;
     renderAll(lastModel);
+    return;
+  }
+
+  const expandMapBtn = event.target.closest("button[data-action='expand-map']");
+  if (expandMapBtn && lastModel) {
+    const routeId = String(expandMapBtn.dataset.routeId || "");
+    if (routeId) openMapModal(routeId);
     return;
   }
 
@@ -215,6 +231,10 @@ resultsEl.addEventListener("change", (event) => {
       mapStyleById.set(mapId, style);
       const ctx = routeMapInstances.get(mapId);
       if (ctx) applyMapStyle(ctx, style, true);
+      if (mapModalCtx && mapModalMapId === mapId) {
+        applyMapStyle(mapModalCtx, style, false);
+        if (mapModalStyleEl) mapModalStyleEl.value = style;
+      }
     }
   }
 });
@@ -305,6 +325,79 @@ formEl.addEventListener("submit", async (event) => {
     generateBtn.textContent = "Generate Routes";
   }
 });
+
+function initMapModal() {
+  if (!mapModalEl) return;
+  if (window.bootstrap?.Modal) {
+    mapModalInstance = window.bootstrap.Modal.getOrCreateInstance(mapModalEl);
+  }
+
+  if (mapModalStyleEl) {
+    mapModalStyleEl.innerHTML = MAP_STYLE_OPTIONS
+      .map((opt) => `<option value="${opt.value}">${opt.label}</option>`)
+      .join("");
+    mapModalStyleEl.addEventListener("change", () => {
+      if (!mapModalMapId || !mapModalStyleEl) return;
+      const style = String(mapModalStyleEl.value || MAP_DEFAULT_STYLE);
+      mapStyleById.set(mapModalMapId, style);
+      const inlineSelect = document.querySelector(`.rs-map-style-select[data-map-id="${mapModalMapId}"]`);
+      if (inlineSelect) inlineSelect.value = style;
+      const inlineCtx = routeMapInstances.get(mapModalMapId);
+      if (inlineCtx) applyMapStyle(inlineCtx, style, false);
+      if (mapModalCtx) applyMapStyle(mapModalCtx, style, false);
+    });
+  }
+
+  mapModalEl.addEventListener("shown.bs.modal", () => {
+    if (!mapModalCtx?.map) return;
+    setTimeout(() => {
+      mapModalCtx?.map?.invalidateSize();
+    }, 50);
+  });
+
+  mapModalEl.addEventListener("hidden.bs.modal", () => {
+    destroyModalMap();
+  });
+
+  window.addEventListener("resize", () => {
+    if (!mapModalEl?.classList.contains("show") || !mapModalCtx?.map) return;
+    setTimeout(() => mapModalCtx?.map?.invalidateSize(), 50);
+  });
+}
+
+function openMapModal(routeId) {
+  if (!lastModel || !mapModalEl || !mapModalCanvasEl) return;
+  const route = lastModel.routes.find((r) => r.id === routeId);
+  if (!route) return;
+  const mapId = mapContainerId(route);
+  destroyModalMap();
+  mapModalMapId = mapId;
+  const style = mapStyleById.get(mapId) || MAP_DEFAULT_STYLE;
+
+  if (mapModalTitleEl) mapModalTitleEl.textContent = `Route Map: ${route.summary}`;
+  if (mapModalStyleEl) mapModalStyleEl.value = style;
+  if (mapModalNoteEl) mapModalNoteEl.textContent = "";
+
+  mapModalCtx = createMapContext({
+    mapEl: mapModalCanvasEl,
+    mapId,
+    noteEl: mapModalNoteEl,
+    route,
+    origin: lastModel.origin
+  });
+  if (!mapModalCtx) return;
+  applyMapStyle(mapModalCtx, style, false);
+
+  if (mapModalInstance) mapModalInstance.show();
+  else mapModalEl.classList.add("show");
+}
+
+function destroyModalMap() {
+  if (mapModalCtx?.monitor?.timerId) clearTimeout(mapModalCtx.monitor.timerId);
+  if (mapModalCtx?.map) mapModalCtx.map.remove();
+  mapModalCtx = null;
+  mapModalMapId = null;
+}
 
 function updateDistanceControl(flightType) {
   const rules = FLIGHT_RULES[flightType];
@@ -1441,11 +1534,14 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
           <div class="mt-3 pt-3 border-top">
             <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-2">
               <div class="fw-semibold">Route Quick Map</div>
-              <div class="d-flex align-items-center gap-2">
+              <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
                 <label class="small text-secondary mb-0" for="${mapId}-style">Map</label>
                 <select id="${mapId}-style" class="form-select form-select-sm rs-map-style-select" data-map-id="${mapId}">
                   ${MAP_STYLE_OPTIONS.map((opt) => `<option value="${opt.value}" ${opt.value === selectedMapStyle ? "selected" : ""}>${opt.label}</option>`).join("")}
                 </select>
+                <button class="btn btn-outline-primary btn-sm" type="button" data-action="expand-map" data-route-id="${route.id}">
+                  Expand Map
+                </button>
               </div>
             </div>
             <div id="${mapId}" class="rs-route-map border rounded-3"></div>
@@ -1692,11 +1788,22 @@ function renderRouteMap(route, origin, mapId) {
     existing.map.remove();
     routeMapInstances.delete(mapId);
   }
+  const noteEl = document.getElementById(`${mapId}-note`);
+  const ctx = createMapContext({ mapEl, mapId, noteEl, route, origin });
+  if (!ctx) return;
+  routeMapInstances.set(mapId, ctx);
+  const desiredStyle = mapStyleById.get(mapId) || MAP_DEFAULT_STYLE;
+  applyMapStyle(ctx, desiredStyle, true);
+  setTimeout(() => ctx.map.invalidateSize(), 0);
+}
+
+function createMapContext({ mapEl, mapId, noteEl, route, origin }) {
+  if (!mapEl || typeof window.L === "undefined") return null;
 
   const points = [origin, ...route.stops, origin]
     .filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon))
     .map((p) => [p.lat, p.lon]);
-  if (!points.length) return;
+  if (!points.length) return null;
 
   const map = window.L.map(mapEl, {
     zoomControl: true,
@@ -1729,7 +1836,6 @@ function renderRouteMap(route, origin, mapId) {
     detectRetina: true,
     updateWhenZooming: false
   });
-  const noteEl = document.getElementById(`${mapId}-note`);
 
   const ctx = {
     mapId,
@@ -1749,13 +1855,13 @@ function renderRouteMap(route, origin, mapId) {
       fallbackDone: false
     }
   };
+
   ifrLowLayer.on("tileerror", () => onIfrTileError(ctx, MAP_STYLE_IFR_LOW));
   ifrHighLayer.on("tileerror", () => onIfrTileError(ctx, MAP_STYLE_IFR_HIGH));
   ifrLowLayer.on("tileload", () => onIfrTileLoad(ctx, MAP_STYLE_IFR_LOW));
   ifrHighLayer.on("tileload", () => onIfrTileLoad(ctx, MAP_STYLE_IFR_HIGH));
 
   streetLayer.addTo(map);
-
   const polyline = window.L.polyline(points, { color: "#0a5d8f", weight: 4 }).addTo(map);
   window.L.marker([origin.lat, origin.lon]).addTo(map).bindPopup(`Origin: ${origin.ident}`);
 
@@ -1764,10 +1870,7 @@ function renderRouteMap(route, origin, mapId) {
   }
 
   map.fitBounds(polyline.getBounds(), { padding: [18, 18] });
-  routeMapInstances.set(mapId, ctx);
-  const desiredStyle = mapStyleById.get(mapId) || MAP_DEFAULT_STYLE;
-  applyMapStyle(ctx, desiredStyle, true);
-  setTimeout(() => map.invalidateSize(), 0);
+  return ctx;
 }
 
 function applyMapStyle(ctx, style, persistSelection) {
@@ -1825,6 +1928,7 @@ function resetIfrMonitor(ctx, style) {
     applyMapStyle(ctx, MAP_STYLE_STREET, true);
     const select = document.querySelector(`.rs-map-style-select[data-map-id="${ctx.mapId}"]`);
     if (select) select.value = MAP_STYLE_STREET;
+    if (mapModalCtx === ctx && mapModalStyleEl) mapModalStyleEl.value = MAP_STYLE_STREET;
     setMapNote(ctx, "IFR tiles unavailable for this view. Reverted to Street.");
   }, MAP_IFR_FALLBACK_WINDOW_MS);
 }

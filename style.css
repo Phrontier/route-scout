@@ -237,13 +237,23 @@ body {
 }
 
 .rs-route-map {
-  height: 260px;
+  aspect-ratio: 16 / 9;
+  min-height: 240px;
+  max-height: 520px;
+  height: auto;
   width: 100%;
   background: #eef3f8;
 }
 
 .rs-map-style-select {
   min-width: 132px;
+}
+
+.rs-route-map-modal {
+  aspect-ratio: auto;
+  height: clamp(60vh, 72vh, 82vh);
+  min-height: 360px;
+  max-height: none;
 }
 
 #results .card:hover {
@@ -269,7 +279,13 @@ main {
   }
 
   .rs-route-map {
-    height: 220px;
+    aspect-ratio: 4 / 3;
+    min-height: 240px;
+  }
+
+  .rs-route-map-modal {
+    height: 74vh;
+    min-height: 300px;
   }
 
   #status {

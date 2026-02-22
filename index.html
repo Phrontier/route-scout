@@ -8,16 +8,16 @@
     <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
     <meta http-equiv="Pragma" content="no-cache" />
     <meta http-equiv="Expires" content="0" />
-    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=0.0.26" />
-    <link rel="shortcut icon" href="favicon.svg?v=0.0.26" />
-    <link rel="stylesheet" href="bootstrap-5.3.8-dist/css/bootstrap.min.css?v=0.0.26" />
+    <link rel="icon" type="image/svg+xml" href="favicon.svg?v=0.0.27" />
+    <link rel="shortcut icon" href="favicon.svg?v=0.0.27" />
+    <link rel="stylesheet" href="bootstrap-5.3.8-dist/css/bootstrap.min.css?v=0.0.27" />
     <link
       rel="stylesheet"
       href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
       crossorigin=""
     />
-    <link rel="stylesheet" href="style.css?v=0.0.26" />
+    <link rel="stylesheet" href="style.css?v=0.0.27" />
   </head>
   <body>
     <main class="container-xxl py-4">
@@ -112,12 +112,31 @@
       <section id="results" class="vstack gap-3"></section>
     </main>
 
-    <script src="bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js?v=0.0.26"></script>
+    <div class="modal fade" id="route-map-modal" tabindex="-1" aria-labelledby="route-map-modal-title" aria-hidden="true">
+      <div class="modal-dialog modal-xl modal-dialog-centered modal-fullscreen-md-down">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2 class="h5 modal-title mb-0" id="route-map-modal-title">Route Map</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-2">
+              <label for="route-map-modal-style" class="small text-secondary mb-0">Map</label>
+              <select id="route-map-modal-style" class="form-select form-select-sm rs-map-style-select"></select>
+            </div>
+            <div id="route-map-modal-canvas" class="rs-route-map rs-route-map-modal border rounded-3"></div>
+            <div id="route-map-modal-note" class="small text-secondary mt-2"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script src="bootstrap-5.3.8-dist/js/bootstrap.bundle.min.js?v=0.0.27"></script>
     <script
       src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
       integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
       crossorigin=""
     ></script>
-    <script src="app.js?v=0.0.26" type="module"></script>
+    <script src="app.js?v=0.0.27" type="module"></script>
   </body>
 </html>
