@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.24";
+const APP_VERSION = "0.0.25";
 const VERSION_FILE_PATH = "version.json";
 const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -23,6 +23,11 @@ const PROXY_PATH = "/proxy";
 const MAP_STYLE_STREET = "street";
 const MAP_STYLE_IFR_LOW = "ifr_low";
 const MAP_STYLE_IFR_HIGH = "ifr_high";
+const IFR_LOW_TILE_URL = "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/IFR_AreaLow/MapServer/tile/{z}/{y}/{x}";
+const IFR_HIGH_TILE_URL = "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/IFR_High/MapServer/tile/{z}/{y}/{x}";
+const MAP_IFR_FALLBACK_WINDOW_MS = 2600;
+const MAP_IFR_MIN_ERROR_THRESHOLD = 5;
+const MAP_IFR_MAX_SUCCESS_FOR_FALLBACK = 1;
 const MAP_STYLE_OPTIONS = [
   { value: MAP_STYLE_STREET, label: "Street" },
   { value: MAP_STYLE_IFR_LOW, label: "IFR Low" },
@@ -1374,7 +1379,8 @@ function renderAll(model) {
   }
   for (const [mapId, instance] of routeMapInstances.entries()) {
     if (activeMapIds.has(mapId)) continue;
-    instance.remove();
+    if (instance?.map) instance.map.remove();
+    if (instance?.monitor?.timerId) clearTimeout(instance.monitor.timerId);
     routeMapInstances.delete(mapId);
   }
 }
@@ -1402,6 +1408,7 @@ function stopOverviewHtml(stop) {
 }
 
 function routeDetailInlineHtml(route, origin, originProfile, mapId) {
+  const selectedMapStyle = mapStyleById.get(mapId) || MAP_STYLE_STREET;
   const legRows = route.legs
     .map((leg) => `<li class="list-group-item d-flex justify-content-between"><span>${leg.from} -> ${leg.to}</span><span>${leg.distanceNm.toFixed(1)} NM</span></li>`)
     .join("");
@@ -1436,11 +1443,12 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
               <div class="d-flex align-items-center gap-2">
                 <label class="small text-secondary mb-0" for="${mapId}-style">Map</label>
                 <select id="${mapId}-style" class="form-select form-select-sm rs-map-style-select" data-map-id="${mapId}">
-                  ${MAP_STYLE_OPTIONS.map((opt) => `<option value="${opt.value}" ${opt.value === MAP_STYLE_STREET ? "selected" : ""}>${opt.label}</option>`).join("")}
+                  ${MAP_STYLE_OPTIONS.map((opt) => `<option value="${opt.value}" ${opt.value === selectedMapStyle ? "selected" : ""}>${opt.label}</option>`).join("")}
                 </select>
               </div>
             </div>
             <div id="${mapId}" class="rs-route-map border rounded-3"></div>
+            <div id="${mapId}-note" class="small text-secondary mt-1"></div>
           </div>
         </div>
       </div>
@@ -1679,6 +1687,7 @@ function renderRouteMap(route, origin, mapId) {
 
   const existing = routeMapInstances.get(mapId);
   if (existing?.map) {
+    if (existing?.monitor?.timerId) clearTimeout(existing.monitor.timerId);
     existing.map.remove();
     routeMapInstances.delete(mapId);
   }
@@ -1693,40 +1702,40 @@ function renderRouteMap(route, origin, mapId) {
     maxZoom: 13,
     attribution: "&copy; OpenStreetMap contributors"
   });
-  const ifrLowLayer = window.L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/IFR_AreaLow/MapServer/tile/{z}/{y}/{x}", {
+  const ifrLowLayer = window.L.tileLayer(IFR_LOW_TILE_URL, {
     maxZoom: 13,
-    attribution: "FAA/Esri IFR Low"
+    attribution: "FAA/Esri IFR Low",
+    crossOrigin: true
   });
-  const ifrHighLayer = window.L.tileLayer("https://services.arcgisonline.com/ArcGIS/rest/services/Specialty/IFR_High/MapServer/tile/{z}/{y}/{x}", {
+  const ifrHighLayer = window.L.tileLayer(IFR_HIGH_TILE_URL, {
     maxZoom: 13,
-    attribution: "FAA/Esri IFR High"
+    attribution: "FAA/Esri IFR High",
+    crossOrigin: true
   });
+  const noteEl = document.getElementById(`${mapId}-note`);
 
   const ctx = {
     mapId,
     map,
+    noteEl,
     layers: {
       [MAP_STYLE_STREET]: streetLayer,
       [MAP_STYLE_IFR_LOW]: ifrLowLayer,
       [MAP_STYLE_IFR_HIGH]: ifrHighLayer
     },
     activeStyle: MAP_STYLE_STREET,
-    fallbackInProgress: false
+    monitor: {
+      style: MAP_STYLE_STREET,
+      loadCount: 0,
+      errorCount: 0,
+      timerId: null,
+      fallbackDone: false
+    }
   };
-
-  const onIfrTileError = () => {
-    if (ctx.activeStyle === MAP_STYLE_STREET || ctx.fallbackInProgress) return;
-    ctx.fallbackInProgress = true;
-    applyMapStyle(ctx, MAP_STYLE_STREET, false);
-    const select = document.querySelector(`.rs-map-style-select[data-map-id="${ctx.mapId}"]`);
-    if (select) select.value = MAP_STYLE_STREET;
-    setTimeout(() => {
-      ctx.fallbackInProgress = false;
-    }, 400);
-  };
-
-  ifrLowLayer.on("tileerror", onIfrTileError);
-  ifrHighLayer.on("tileerror", onIfrTileError);
+  ifrLowLayer.on("tileerror", () => onIfrTileError(ctx, MAP_STYLE_IFR_LOW));
+  ifrHighLayer.on("tileerror", () => onIfrTileError(ctx, MAP_STYLE_IFR_HIGH));
+  ifrLowLayer.on("tileload", () => onIfrTileLoad(ctx, MAP_STYLE_IFR_LOW));
+  ifrHighLayer.on("tileload", () => onIfrTileLoad(ctx, MAP_STYLE_IFR_HIGH));
 
   streetLayer.addTo(map);
 
@@ -1748,14 +1757,67 @@ function applyMapStyle(ctx, style, persistSelection) {
   const chosenStyle = ctx.layers[style] ? style : MAP_STYLE_STREET;
   if (persistSelection) mapStyleById.set(ctx.mapId, chosenStyle);
 
-  const currentLayer = ctx.layers[ctx.activeStyle];
-  if (currentLayer && ctx.map.hasLayer(currentLayer)) {
-    ctx.map.removeLayer(currentLayer);
+  const streetLayer = ctx.layers[MAP_STYLE_STREET];
+  const ifrLowLayer = ctx.layers[MAP_STYLE_IFR_LOW];
+  const ifrHighLayer = ctx.layers[MAP_STYLE_IFR_HIGH];
+
+  if (streetLayer && !ctx.map.hasLayer(streetLayer)) {
+    streetLayer.addTo(ctx.map);
+  }
+  if (ifrLowLayer && ctx.map.hasLayer(ifrLowLayer)) ctx.map.removeLayer(ifrLowLayer);
+  if (ifrHighLayer && ctx.map.hasLayer(ifrHighLayer)) ctx.map.removeLayer(ifrHighLayer);
+
+  if (chosenStyle !== MAP_STYLE_STREET) {
+    const overlayLayer = ctx.layers[chosenStyle];
+    if (overlayLayer && !ctx.map.hasLayer(overlayLayer)) overlayLayer.addTo(ctx.map);
   }
 
-  const nextLayer = ctx.layers[chosenStyle] || ctx.layers[MAP_STYLE_STREET];
-  nextLayer.addTo(ctx.map);
+  resetIfrMonitor(ctx, chosenStyle);
+  setMapNote(ctx, "");
   ctx.activeStyle = chosenStyle;
+}
+
+function resetIfrMonitor(ctx, style) {
+  if (!ctx.monitor) return;
+  if (ctx.monitor.timerId) clearTimeout(ctx.monitor.timerId);
+  ctx.monitor.style = style;
+  ctx.monitor.loadCount = 0;
+  ctx.monitor.errorCount = 0;
+  ctx.monitor.timerId = null;
+  ctx.monitor.fallbackDone = false;
+
+  if (style === MAP_STYLE_STREET) return;
+
+  ctx.monitor.timerId = setTimeout(() => {
+    ctx.monitor.timerId = null;
+    if (ctx.activeStyle !== style || ctx.monitor.style !== style || ctx.monitor.fallbackDone) return;
+
+    const shouldFallback =
+      ctx.monitor.errorCount >= MAP_IFR_MIN_ERROR_THRESHOLD &&
+      ctx.monitor.loadCount <= MAP_IFR_MAX_SUCCESS_FOR_FALLBACK;
+    if (!shouldFallback) return;
+
+    ctx.monitor.fallbackDone = true;
+    applyMapStyle(ctx, MAP_STYLE_STREET, true);
+    const select = document.querySelector(`.rs-map-style-select[data-map-id="${ctx.mapId}"]`);
+    if (select) select.value = MAP_STYLE_STREET;
+    setMapNote(ctx, "IFR tiles unavailable for this view. Reverted to Street.");
+  }, MAP_IFR_FALLBACK_WINDOW_MS);
+}
+
+function onIfrTileLoad(ctx, style) {
+  if (!ctx.monitor || ctx.activeStyle !== style || ctx.monitor.style !== style) return;
+  ctx.monitor.loadCount += 1;
+}
+
+function onIfrTileError(ctx, style) {
+  if (!ctx.monitor || ctx.activeStyle !== style || ctx.monitor.style !== style) return;
+  ctx.monitor.errorCount += 1;
+}
+
+function setMapNote(ctx, text) {
+  if (!ctx?.noteEl) return;
+  ctx.noteEl.textContent = text || "";
 }
 
 function dedupeApproaches(rows) {
