@@ -237,9 +237,9 @@ body {
 }
 
 .rs-route-map {
-  aspect-ratio: 16 / 9;
+  aspect-ratio: 2 / 1;
   min-height: 240px;
-  max-height: 520px;
+  max-height: 420px;
   height: auto;
   width: 100%;
   background: #eef3f8;
@@ -247,6 +247,10 @@ body {
 
 .rs-map-style-select {
   min-width: 132px;
+}
+
+.rs-map-toolbar label {
+  white-space: nowrap;
 }
 
 .rs-route-map-modal {
@@ -281,6 +285,21 @@ main {
   .rs-route-map {
     aspect-ratio: 4 / 3;
     min-height: 240px;
+  }
+
+  .rs-map-toolbar {
+    width: 100%;
+    justify-content: stretch !important;
+    align-items: stretch !important;
+    display: grid !important;
+    grid-template-columns: 1fr;
+    gap: 0.45rem;
+  }
+
+  .rs-map-toolbar .rs-map-style-select,
+  .rs-map-toolbar .btn {
+    width: 100%;
+    min-width: 0;
   }
 
   .rs-route-map-modal {

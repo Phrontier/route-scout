@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.27";
+const APP_VERSION = "0.0.28";
 const VERSION_FILE_PATH = "version.json";
 const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -27,7 +27,9 @@ const MAP_DEFAULT_STYLE = MAP_STYLE_IFR_LOW;
 const IFR_LOW_TILE_URL = "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/IFR_AreaLow/MapServer/tile/{z}/{y}/{x}";
 const IFR_HIGH_TILE_URL = "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/IFR_High/MapServer/tile/{z}/{y}/{x}";
 const MAP_IFR_FALLBACK_WINDOW_MS = 2600;
+const MAP_IFR_MODAL_FALLBACK_WINDOW_MS = 3600;
 const MAP_IFR_MIN_ERROR_THRESHOLD = 5;
+const MAP_IFR_MODAL_MIN_ERROR_THRESHOLD = 8;
 const MAP_IFR_MAX_SUCCESS_FOR_FALLBACK = 1;
 const MAP_STYLE_OPTIONS = [
   { value: MAP_STYLE_IFR_LOW, label: "IFR Low" },
@@ -212,7 +214,13 @@ resultsEl.addEventListener("click", (event) => {
   const routeId = String(button.dataset.routeId || "");
   if (!routeId) return;
   if (expandedRouteIds.has(routeId)) expandedRouteIds.delete(routeId);
-  else expandedRouteIds.add(routeId);
+  else {
+    expandedRouteIds.add(routeId);
+    const route = lastModel.routes.find((r) => r.id === routeId);
+    if (route) {
+      mapStyleById.set(mapContainerId(route), MAP_DEFAULT_STYLE);
+    }
+  }
   renderAll(lastModel);
 });
 
@@ -383,7 +391,8 @@ function openMapModal(routeId) {
     mapId,
     noteEl: mapModalNoteEl,
     route,
-    origin: lastModel.origin
+    origin: lastModel.origin,
+    isModal: true
   });
   if (!mapModalCtx) return;
   applyMapStyle(mapModalCtx, style, false);
@@ -1534,7 +1543,7 @@ function routeDetailInlineHtml(route, origin, originProfile, mapId) {
           <div class="mt-3 pt-3 border-top">
             <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-2">
               <div class="fw-semibold">Route Quick Map</div>
-              <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+              <div class="rs-map-toolbar d-flex align-items-center gap-2 flex-wrap justify-content-end">
                 <label class="small text-secondary mb-0" for="${mapId}-style">Map</label>
                 <select id="${mapId}-style" class="form-select form-select-sm rs-map-style-select" data-map-id="${mapId}">
                   ${MAP_STYLE_OPTIONS.map((opt) => `<option value="${opt.value}" ${opt.value === selectedMapStyle ? "selected" : ""}>${opt.label}</option>`).join("")}
@@ -1797,7 +1806,7 @@ function renderRouteMap(route, origin, mapId) {
   setTimeout(() => ctx.map.invalidateSize(), 0);
 }
 
-function createMapContext({ mapEl, mapId, noteEl, route, origin }) {
+function createMapContext({ mapEl, mapId, noteEl, route, origin, isModal = false }) {
   if (!mapEl || typeof window.L === "undefined") return null;
 
   const points = [origin, ...route.stops, origin]
@@ -1841,6 +1850,7 @@ function createMapContext({ mapEl, mapId, noteEl, route, origin }) {
     mapId,
     map,
     noteEl,
+    isModal,
     layers: {
       [MAP_STYLE_STREET]: streetLayer,
       [MAP_STYLE_IFR_LOW]: ifrLowLayer,
@@ -1915,12 +1925,15 @@ function resetIfrMonitor(ctx, style) {
 
   if (style === MAP_STYLE_STREET) return;
 
+  const fallbackWindowMs = ctx.isModal ? MAP_IFR_MODAL_FALLBACK_WINDOW_MS : MAP_IFR_FALLBACK_WINDOW_MS;
+  const minErrorThreshold = ctx.isModal ? MAP_IFR_MODAL_MIN_ERROR_THRESHOLD : MAP_IFR_MIN_ERROR_THRESHOLD;
+
   ctx.monitor.timerId = setTimeout(() => {
     ctx.monitor.timerId = null;
     if (ctx.activeStyle !== style || ctx.monitor.style !== style || ctx.monitor.fallbackDone) return;
 
     const shouldFallback =
-      ctx.monitor.errorCount >= MAP_IFR_MIN_ERROR_THRESHOLD &&
+      ctx.monitor.errorCount >= minErrorThreshold &&
       ctx.monitor.loadCount <= MAP_IFR_MAX_SUCCESS_FOR_FALLBACK;
     if (!shouldFallback) return;
 
@@ -1930,7 +1943,7 @@ function resetIfrMonitor(ctx, style) {
     if (select) select.value = MAP_STYLE_STREET;
     if (mapModalCtx === ctx && mapModalStyleEl) mapModalStyleEl.value = MAP_STYLE_STREET;
     setMapNote(ctx, "IFR tiles unavailable for this view. Reverted to Street.");
-  }, MAP_IFR_FALLBACK_WINDOW_MS);
+  }, fallbackWindowMs);
 }
 
 function onIfrTileLoad(ctx, style) {
