@@ -14,7 +14,7 @@ const AVIATION_API_CHARTS = "https://api.aviationapi.com/v1/charts";
 const FAA_DTPP_SEARCH_URL = "https://www.faa.gov/air_traffic/flight_info/aeronav/digital_products/dtpp/search/";
 const FAA_DTPP_XML_MATCH = /https?:\\?\/\\?\/aeronav\.faa\.gov\\?\/upload_[^"'\s]+d-tpp_[^"'\s]+_Metafile\.xml/gi;
 const FAA_IAP_CODES = new Set(["IAP", "IAPMIN", "IAPCOPTER", "IAPMIL"]);
-const APP_VERSION = "0.0.25";
+const APP_VERSION = "0.0.26";
 const VERSION_FILE_PATH = "version.json";
 const LOADING_MESSAGES_PATH = "loading-messages.txt";
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1"]);
@@ -23,15 +23,16 @@ const PROXY_PATH = "/proxy";
 const MAP_STYLE_STREET = "street";
 const MAP_STYLE_IFR_LOW = "ifr_low";
 const MAP_STYLE_IFR_HIGH = "ifr_high";
+const MAP_DEFAULT_STYLE = MAP_STYLE_IFR_LOW;
 const IFR_LOW_TILE_URL = "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/IFR_AreaLow/MapServer/tile/{z}/{y}/{x}";
 const IFR_HIGH_TILE_URL = "https://tiles.arcgis.com/tiles/ssFJjBXIUyZDrSYZ/arcgis/rest/services/IFR_High/MapServer/tile/{z}/{y}/{x}";
 const MAP_IFR_FALLBACK_WINDOW_MS = 2600;
 const MAP_IFR_MIN_ERROR_THRESHOLD = 5;
 const MAP_IFR_MAX_SUCCESS_FOR_FALLBACK = 1;
 const MAP_STYLE_OPTIONS = [
-  { value: MAP_STYLE_STREET, label: "Street" },
   { value: MAP_STYLE_IFR_LOW, label: "IFR Low" },
-  { value: MAP_STYLE_IFR_HIGH, label: "IFR High" }
+  { value: MAP_STYLE_IFR_HIGH, label: "IFR High" },
+  { value: MAP_STYLE_STREET, label: "Street" }
 ];
 const SINGLE_PROFILE_POOL_SIZE = 45;
 const DOUBLE_PROFILE_POOL_SIZE = 80;
@@ -209,7 +210,7 @@ resultsEl.addEventListener("change", (event) => {
   const styleSelect = event.target.closest(".rs-map-style-select");
   if (styleSelect) {
     const mapId = String(styleSelect.dataset.mapId || "");
-    const style = String(styleSelect.value || MAP_STYLE_STREET);
+    const style = String(styleSelect.value || MAP_DEFAULT_STYLE);
     if (mapId) {
       mapStyleById.set(mapId, style);
       const ctx = routeMapInstances.get(mapId);
@@ -1408,7 +1409,7 @@ function stopOverviewHtml(stop) {
 }
 
 function routeDetailInlineHtml(route, origin, originProfile, mapId) {
-  const selectedMapStyle = mapStyleById.get(mapId) || MAP_STYLE_STREET;
+  const selectedMapStyle = mapStyleById.get(mapId) || MAP_DEFAULT_STYLE;
   const legRows = route.legs
     .map((leg) => `<li class="list-group-item d-flex justify-content-between"><span>${leg.from} -> ${leg.to}</span><span>${leg.distanceNm.toFixed(1)} NM</span></li>`)
     .join("");
@@ -1697,20 +1698,36 @@ function renderRouteMap(route, origin, mapId) {
     .map((p) => [p.lat, p.lon]);
   if (!points.length) return;
 
-  const map = window.L.map(mapEl, { zoomControl: true, scrollWheelZoom: false });
+  const map = window.L.map(mapEl, {
+    zoomControl: true,
+    scrollWheelZoom: false,
+    zoomAnimation: false,
+    fadeAnimation: false,
+    markerZoomAnimation: false
+  });
   const streetLayer = window.L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
     maxZoom: 13,
-    attribution: "&copy; OpenStreetMap contributors"
+    attribution: "&copy; OpenStreetMap contributors",
+    detectRetina: true,
+    updateWhenZooming: false
   });
   const ifrLowLayer = window.L.tileLayer(IFR_LOW_TILE_URL, {
     maxZoom: 13,
+    minNativeZoom: 7,
+    maxNativeZoom: 12,
     attribution: "FAA/Esri IFR Low",
-    crossOrigin: true
+    crossOrigin: true,
+    detectRetina: true,
+    updateWhenZooming: false
   });
   const ifrHighLayer = window.L.tileLayer(IFR_HIGH_TILE_URL, {
     maxZoom: 13,
+    minNativeZoom: 7,
+    maxNativeZoom: 12,
     attribution: "FAA/Esri IFR High",
-    crossOrigin: true
+    crossOrigin: true,
+    detectRetina: true,
+    updateWhenZooming: false
   });
   const noteEl = document.getElementById(`${mapId}-note`);
 
@@ -1748,13 +1765,13 @@ function renderRouteMap(route, origin, mapId) {
 
   map.fitBounds(polyline.getBounds(), { padding: [18, 18] });
   routeMapInstances.set(mapId, ctx);
-  const desiredStyle = mapStyleById.get(mapId) || MAP_STYLE_STREET;
+  const desiredStyle = mapStyleById.get(mapId) || MAP_DEFAULT_STYLE;
   applyMapStyle(ctx, desiredStyle, true);
   setTimeout(() => map.invalidateSize(), 0);
 }
 
 function applyMapStyle(ctx, style, persistSelection) {
-  const chosenStyle = ctx.layers[style] ? style : MAP_STYLE_STREET;
+  const chosenStyle = ctx.layers[style] ? style : MAP_DEFAULT_STYLE;
   if (persistSelection) mapStyleById.set(ctx.mapId, chosenStyle);
 
   const streetLayer = ctx.layers[MAP_STYLE_STREET];
@@ -1770,6 +1787,13 @@ function applyMapStyle(ctx, style, persistSelection) {
   if (chosenStyle !== MAP_STYLE_STREET) {
     const overlayLayer = ctx.layers[chosenStyle];
     if (overlayLayer && !ctx.map.hasLayer(overlayLayer)) overlayLayer.addTo(ctx.map);
+    streetLayer?.setOpacity?.(0.28);
+    ifrLowLayer?.setOpacity?.(1);
+    ifrHighLayer?.setOpacity?.(1);
+  } else {
+    streetLayer?.setOpacity?.(1);
+    ifrLowLayer?.setOpacity?.(1);
+    ifrHighLayer?.setOpacity?.(1);
   }
 
   resetIfrMonitor(ctx, chosenStyle);
